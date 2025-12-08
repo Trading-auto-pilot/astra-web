@@ -1,0 +1,134 @@
+name: CI/CD Frontend AstraAI
+
+on:
+  push:
+    branches:
+      - PAPER
+      - LIVE
+
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  GCP_HOST: ${{ secrets.GCP_HOST }}
+  GCP_USER: ${{ secrets.GCP_USER }}
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  SERVICE_NAME: astraai-frontend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          clean: true
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: 🚦 Verifica modalità di deploy su LIVE
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          EVENT_NAME="${{ github.event_name }}"
+          SOURCE_BRANCH="${{ github.event.pull_request.head.ref }}"
+          TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
+
+          echo "🔍 Branch: $BRANCH_NAME, Evento: $EVENT_NAME, PR Source: $SOURCE_BRANCH, PR Target: $TARGET_BRANCH"
+
+          if [[ "$BRANCH_NAME" == "LIVE" ]]; then
+            if [[ "$EVENT_NAME" != "pull_request" ]]; then
+              echo "❌ Deploy su LIVE permesso solo tramite Pull Request da PAPER"
+              exit 1
+            fi
+
+            if [[ "$SOURCE_BRANCH" != "PAPER" || "$TARGET_BRANCH" != "LIVE" ]]; then
+              echo "❌ Solo PR da PAPER a LIVE sono consentite"
+              exit 1
+            fi
+          fi
+
+          echo "✅ Controllo superato, proseguo con il deploy..."
+
+      - name: Leggi versione da release.json
+        id: version
+        run: |
+          if [[ ! -f release.json ]]; then
+            echo "❌ release.json non trovato!"
+            exit 1
+          fi
+          VERSION=$(jq -r '.version' release.json)
+          if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
+            echo "❌ Campo .version non valido in release.json"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "🏷 Versione frontend: $VERSION"
+
+      - name: Build and push frontend image (solo PAPER)
+        if: ${{ github.ref_name == 'PAPER' }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          NAME="${{ env.SERVICE_NAME }}"
+          echo "🔧 Build & push $NAME:$VERSION"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --push \
+            --tag "$DOCKERHUB_USERNAME/$NAME:latest" \
+            --tag "$DOCKERHUB_USERNAME/$NAME:$VERSION" \
+            .
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy frontend su server
+        run: |
+          ssh -o StrictHostKeyChecking=no $GCP_USER@$GCP_HOST "ENV_NAME=${{ github.ref_name }} bash -s" << 'EOF'
+            cd ~/deploy
+
+            # ENV_NAME = PAPER o LIVE
+            LOWER_ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]')
+            COMPOSE_FILE="docker-compose.${LOWER_ENV_NAME}.yml"
+
+            if [[ ! -f ".env" ]]; then
+              echo "❌ .env non trovato in ~/deploy (deve contenere ASTRAAI_FRONTEND_VERSION)"
+              exit 1
+            fi
+
+            # carico le variabili (.env già gestito dal backend pipeline)
+            set -a
+            . .env
+            set +a
+
+            if [[ -z "$ASTRAAI_FRONTEND_VERSION" ]]; then
+              echo "⚠️ ASTRAAI_FRONTEND_VERSION non impostata in .env, userò :latest"
+              ASTRAAI_FRONTEND_VERSION="latest"
+            fi
+
+            LOWER_PROJECT_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]')
+
+            echo "📥 Pull immagine frontend versione: $ASTRAAI_FRONTEND_VERSION"
+            docker compose -f "$COMPOSE_FILE" --env-file .env -p "$LOWER_PROJECT_NAME" pull astraai-frontend
+
+            echo "▶️ Avvio servizi tramite deploy-with-profiles.sh"
+            if [[ ! -f "./deploy-with-profiles.sh" ]]; then
+              echo "❌ deploy-with-profiles.sh non trovato in ~/deploy"
+              exit 1
+            fi
+
+            ./deploy-with-profiles.sh "$ENV_NAME" "$COMPOSE_FILE" ".env"
+
+            echo "🧹 Pulizia immagini inutilizzate"
+            docker image prune -a -f
+          EOF
