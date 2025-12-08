@@ -5,7 +5,7 @@ import Title from "../../atoms/typography/Title";
 
 export default function Homepage() {
   return (
-    <LandingLayout backgroundImage="/src/assets/background/landing/space.jpeg">
+    <LandingLayout backgroundImage="/background/landing/space.jpeg">
       <section className="relative flex min-h-[50vh] items-end justify-start px-6 pb-10 pt-20 text-white">
         <div className="absolute right-6 top-6 flex items-center gap-4 text-sm font-medium text-white">
           <a href="#/contact" className="hover:text-white/80">

@@ -14,7 +14,7 @@ export function LandingLayout({
     { label: "Pricing", href: "#pricing" },
     { label: "Contact", href: "#contact" },
   ],
-  backgroundImage = "/src/assets/background/landing/space.jpeg",
+  backgroundImage = "/background/landing/space.jpeg",
 }: LandingLayoutProps) {
   // Keep default navItems for future use while avoiding unused variable warnings.
   void navItems;
