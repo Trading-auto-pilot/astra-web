@@ -1,0 +1,118 @@
+import { initialConfig } from 'config';
+
+const avatar = (index) => `${initialConfig.assetsDir}/images/avatar/${index}.webp`;
+
+export const users = [
+  {
+    id: 0,
+    name: 'Yaga Masamichi',
+    avatar: avatar(1),
+    email: 'yaga.masamichi@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 1,
+    name: 'Manami Suda',
+    avatar: avatar(2),
+    email: 'manami.suda@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 2,
+    name: 'Okkotsu Yuta',
+    avatar: avatar(3),
+    email: 'okkotsu.yuta@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 3,
+    name: 'Kugisaki Nobara',
+    avatar: avatar(4),
+    email: 'kugisaki.nobara@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 4,
+    name: 'Nanami Kento',
+    avatar: avatar(5),
+    email: 'nanami.kento@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 5,
+    name: 'Fushiguro Megumi',
+    avatar: avatar(6),
+    email: 'fushiguro.megumi@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 6,
+    name: 'Nitta Akari',
+    avatar: avatar(7),
+    email: 'nitta.akari@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 7,
+    name: 'Inumaki Toge',
+    avatar: avatar(8),
+    email: 'inumaki.toge@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 8,
+    name: 'Todo Aoi',
+    avatar: avatar(9),
+    email: 'todo.aoi@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 9,
+    name: 'Iori Utahime',
+    avatar: avatar(10),
+    email: 'iori.utahime@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 10,
+    name: 'Tsukumo Yuki',
+    avatar: avatar(11),
+    email: 'tsukumo.yuki@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 11,
+    name: 'Sakurai Haruto',
+    avatar: avatar(12),
+    email: 'sakurai.haruto@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 12,
+    name: 'Gojo Satoru',
+    avatar: avatar(13),
+    email: 'gojo.satoru@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 13,
+    name: 'Hanami',
+    avatar: avatar(14),
+    email: 'hanami@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 14,
+    name: 'Zenin Maki',
+    avatar: avatar(15),
+    email: 'zenin.maki@gmail.com',
+    status: 'online',
+  },
+  {
+    id: 15,
+    name: 'Momo Nishimiya',
+    avatar: avatar(16),
+    email: 'momo.nishimiya@gmail.com',
+    status: 'online',
+  },
+];

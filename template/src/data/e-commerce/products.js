@@ -1,0 +1,826 @@
+import { initialConfig } from 'config';
+import { users } from 'data/users';
+
+const image = (name) => `${initialConfig.assetsDir}/images/ecommerce/products/${name}.webp`;
+
+export const products = [
+  {
+    id: 1,
+    name: 'VINGLI 56" Modern Sofa, Small Corduroy Couch Deep Seat',
+    images: [
+      { color: '#F1E6D5', src: image('details/stain_1') },
+      { color: '#9E7B5D', src: image('details/chestnut_1') },
+      { color: '#7C7B77', src: image('details/grey_1') },
+    ],
+    variants: [
+      { label: 'Size', value: 'S' },
+      {
+        label: 'Color',
+        value: 'Black, White',
+      },
+    ],
+    tags: ['Living room', 'Armchair'],
+    ratings: 4,
+    reviews: 120,
+    price: { regular: 440, discounted: 259, offer: '40%' },
+    sold: 2476,
+    stock: 2,
+    vat: 10,
+    margin: 15,
+    availability: ['low-stock'],
+    sale: ['voucher'],
+    material: ['wood'],
+    category: ['sofa'],
+    features: ['swivel'],
+  },
+  {
+    id: 2,
+    name: 'Fabric Recliner Chair Single Sofa',
+    images: [{ src: image('2') }],
+    variants: [
+      { label: 'Size', value: 'S' },
+      {
+        label: 'Color',
+        value: 'White Chocolate',
+      },
+    ],
+    tags: ['Living room', 'Armchair'],
+    ratings: 3,
+    reviews: 90,
+    price: { regular: 400, discounted: 109, offer: '20%' },
+    sold: 546,
+    stock: 4,
+    vat: 10,
+    margin: 10,
+    availability: ['in-stock'],
+    sale: ['clearance-sale'],
+    material: ['cotton'],
+    category: ['recliner'],
+    features: ['ergonomic'],
+  },
+  {
+    id: 3,
+    name: 'T- CAP  2 Seat Cotton Sofa',
+    images: [{ src: image('3') }],
+    tags: ['Living room', 'Armchair'],
+    variants: [
+      { label: 'Size', value: 'L' },
+      {
+        label: 'Color',
+        value: 'Chinese Black',
+      },
+    ],
+    ratings: 5,
+    reviews: 210,
+    price: { regular: 2000, discounted: 1099, offer: '30%' },
+    sold: 2456,
+    stock: 5,
+    vat: 10,
+    margin: 5,
+    availability: ['in-stock'],
+    sale: ['regular-price'],
+    material: ['metal'],
+    category: ['sectional'],
+    features: ['adjustable'],
+  },
+  {
+    id: 4,
+    name: 'Little Smile 3X6 size for 1 Person- Moshi Fabric Washable Cover',
+    images: [{ src: image('4') }],
+    tags: ['Living room', 'Armchair'],
+    variants: [
+      { label: 'Size', value: 'M' },
+      { label: 'Color', value: 'Navy Blue' },
+    ],
+    ratings: 4,
+    reviews: 150,
+    price: { regular: 740, discounted: 369, offer: '50%' },
+    sold: 1918,
+    stock: 10,
+    vat: 10,
+    margin: 20,
+    availability: ['in-stock'],
+    sale: ['voucher'],
+    material: ['upholstered'],
+    category: ['divan'],
+    features: ['handmade'],
+  },
+  {
+    id: 5,
+    name: 'Century Accent Chair, Modern Fabric Upholstered Armchair',
+    images: [{ src: image('5') }],
+    tags: ['Living room', 'Armchair'],
+    variants: [
+      { label: 'Size', value: 'L' },
+      { label: 'Color', value: 'Red' },
+    ],
+    ratings: 5,
+    reviews: 180,
+    price: { regular: 600, discounted: 299, offer: '30%' },
+    sold: 158,
+    stock: 0,
+    vat: 10,
+    margin: 10,
+    availability: ['out-of-stock'],
+    sale: ['clearance-sale'],
+    material: ['wood'],
+    category: ['chair'],
+    features: ['waterproof'],
+  },
+  {
+    id: 6,
+    name: 'Velvet Swoop Arm Accent Chair',
+    images: [{ src: image('6') }],
+    tags: ['Living room', 'Armchair'],
+    ratings: 4,
+    reviews: 120,
+    price: { regular: 280, discounted: 109, offer: '20%' },
+    sold: 1561,
+    stock: 8,
+    vat: 10,
+    margin: 15,
+    availability: ['in-stock'],
+    sale: ['voucher'],
+    material: ['glass'],
+    category: ['loveseat'],
+    features: ['stackable'],
+  },
+  {
+    id: 7,
+    name: 'Mid-Century Accent Arm Modern Retro  Chair with Solid Wood Frame',
+    images: [{ src: image('7') }],
+    tags: ['Living room', 'Armchair'],
+    variants: [
+      { label: 'Size', value: 'S' },
+      { label: 'Color', value: 'Green' },
+    ],
+    ratings: 4,
+    reviews: 140,
+    price: { regular: 120, discounted: 59, offer: '20%' },
+    sold: 923,
+    stock: 1,
+    vat: 10,
+    margin: 5,
+    availability: ['low-stock'],
+    sale: ['regular-price'],
+    material: ['plastic'],
+    category: ['chair'],
+    features: ['adjustable'],
+  },
+  {
+    id: 8,
+    name: 'Stuffed Animal Storage Bean Bag Chair Cover (No Filler)',
+    images: [{ src: image('8') }],
+    variants: [
+      { label: 'Size', value: 'XL' },
+      { label: 'Color', value: 'Gray' },
+    ],
+    tags: ['Living room', 'Armchair'],
+    ratings: 5,
+    reviews: 160,
+    price: { regular: 160, discounted: 79, offer: '30%' },
+    sold: 1656,
+    stock: 1,
+    vat: 10,
+    margin: 20,
+    availability: ['low-stock'],
+    sale: ['clearance-sale'],
+    material: ['upholstered'],
+    category: ['ottoman'],
+    features: ['outdoor'],
+  },
+  {
+    id: 9,
+    name: 'Leisure Sofa Single Lazy Sofa Hotel Bar Small Apartment',
+    images: [{ src: image('9') }],
+    tags: ['Living room', 'Armchair'],
+    ratings: 4,
+    reviews: 130,
+    variants: [
+      { label: 'Size', value: 'M' },
+      { label: 'Color', value: 'Black' },
+    ],
+    price: { regular: 360, discounted: 229, offer: '40%' },
+    sold: 181,
+    stock: 6,
+    vat: 10,
+    margin: 10,
+    availability: ['in-stock'],
+    sale: ['voucher'],
+    material: ['metal'],
+    category: ['sofa'],
+    features: ['foldable'],
+  },
+  {
+    id: 10,
+    name: 'T-Pop Modern Barrel Accent Chair,  Button Tufted Beige Solid Woven',
+    images: [{ src: image('10') }],
+    tags: ['Living room', 'Armchair'],
+    ratings: 4,
+    reviews: 110,
+    variants: [
+      { label: 'Size', value: 'L' },
+      { label: 'Color', value: 'Blue' },
+    ],
+    price: { regular: 260, discounted: 169, offer: '30%' },
+    sold: 918,
+    stock: 1,
+    vat: 10,
+    margin: 15,
+    availability: ['low-stock'],
+    sale: ['clearance-sale'],
+    material: ['glass'],
+    category: ['sectional'],
+    features: ['handmade'],
+  },
+  {
+    id: 11,
+    name: 'Life.an 38.6" W Modern Style Rolled Arm Chair Sofa',
+    images: [{ src: image('11') }],
+    tags: ['Living room', 'Armchair'],
+    ratings: 4,
+    reviews: 140,
+    variants: [
+      { label: 'Size', value: 'S' },
+      { label: 'Color', value: 'Red' },
+    ],
+    price: { regular: 440, discounted: 319, offer: '20%' },
+    sold: 628,
+    stock: 1,
+    vat: 10,
+    margin: 20,
+    availability: ['low-stock'],
+    sale: ['regular-price'],
+    material: ['upholstered'],
+    category: ['bench'],
+    features: ['ergonomic'],
+  },
+  {
+    id: 12,
+    name: 'Milano Accent  Chair Modern Retro Leisure Chair with Solid Wood Frame',
+    images: [{ src: image('12') }],
+    tags: ['Living room', 'Armchair'],
+    variants: [
+      { label: 'Size', value: 'XL' },
+      { label: 'Color', value: 'White' },
+    ],
+    ratings: 4,
+    reviews: 130,
+    price: { regular: 420, discounted: 239, offer: '30%' },
+    sold: 2136,
+    stock: 3,
+    vat: 10,
+    margin: 5,
+    availability: ['in-stock'],
+    sale: ['voucher'],
+    material: ['wood'],
+    category: ['loveseat'],
+    features: ['outdoor'],
+  },
+  {
+    id: 13,
+    name: 'AIA Tri-Fold Wooden effect leg/Sofa',
+    images: [{ src: image('13') }],
+    tags: ['Living room', 'Armchair'],
+    ratings: 3,
+    reviews: 90,
+    price: { regular: 240, discounted: 189, offer: '20%' },
+    sold: 544,
+    stock: 10,
+    vat: 10,
+    margin: 10,
+    availability: ['in-stock'],
+    sale: ['voucher'],
+    material: ['plastic'],
+    category: ['bench'],
+    features: ['ergonomic'],
+  },
+  {
+    id: 14,
+    name: 'Relax Lounge Accent Chair for Living Room',
+    images: [{ src: image('14') }],
+    tags: ['Living room', 'Armchair'],
+    ratings: 4,
+    reviews: 120,
+    price: { regular: 640, discounted: 389, offer: '40%' },
+    sold: 1245,
+    stock: 3,
+    vat: 10,
+    margin: 5,
+    availability: ['in-stock'],
+    sale: ['regular-price'],
+    material: ['metal'],
+    category: ['divan'],
+    features: ['foldable'],
+  },
+  {
+    id: 15,
+    name: 'BRISTOL Linen Fabric Lounge Chair (Beige)',
+    images: [{ src: image('15') }],
+    tags: ['Living room', 'Armchair'],
+    ratings: 4,
+    reviews: 110,
+    price: { regular: 290, discounted: 129, offer: '30%' },
+    sold: 1445,
+    stock: 2,
+    vat: 10,
+    margin: 15,
+    availability: ['low-stock'],
+    sale: ['clearance-sale'],
+    material: ['cotton'],
+    category: ['sofa'],
+    features: ['swivel'],
+  },
+];
+
+export const featuredProducts = [...products].sort(() => 0.5 - Math.random()).slice(0, 4);
+
+export const suggestedProducts = [...products].sort(() => 0.5 - Math.random()).slice(0, 6);
+
+export const wishlistedProducts = [...products].slice(0, 4);
+
+export const productColorVariants = [
+  {
+    id: 'satin-linen',
+    name: 'Satin linen',
+    color: '#F1E6D5',
+    images: [
+      image('details/stain_1'),
+      image('details/stain_2'),
+      image('details/stain_3'),
+      image('details/stain_4'),
+      image('details/stain_5'),
+      image('details/stain_6'),
+    ],
+  },
+  {
+    id: 'dark-chestnut',
+    name: 'Dark chestnut',
+    color: '#9E7B5D',
+    images: [
+      image('details/chestnut_1'),
+      image('details/chestnut_2'),
+      image('details/chestnut_3'),
+      image('details/chestnut_4'),
+      image('details/chestnut_5'),
+    ],
+  },
+  {
+    id: 'smokey-grey',
+    name: 'Smokey grey',
+    color: '#7C7B77',
+    images: [
+      image('details/grey_1'),
+      image('details/grey_2'),
+      image('details/grey_3'),
+      image('details/grey_4'),
+      image('details/grey_5'),
+    ],
+  },
+];
+
+export const productReviewTags = [
+  { label: 'All' },
+  { label: 'quality', count: 110 },
+  { label: 'aesthetics', count: 91 },
+  { label: 'comfort', count: 25 },
+  { label: 'graceful', count: 50 },
+  { label: 'value for money', count: 70 },
+];
+
+export const productReviews = [
+  {
+    id: 1,
+    user: {
+      name: 'Gojo Satoru',
+      image: users[6].avatar,
+    },
+    rating: 5,
+    date: '22 December, 2023',
+    content: {
+      title: 'Perfection in any setting.',
+      body: `LOVE THIS! This works great for my balcony. The aluminum legs are an integral component with a distinctive aesthetic. They are designed to resemble dancing shoes resting gracefully on the floor, perfectly complementing the shell's elegant curves.`,
+    },
+    helpfulCount: 130,
+  },
+  {
+    id: 2,
+    user: {
+      name: 'Kugisaki Nobara',
+      image: users[2].avatar,
+    },
+    rating: 5,
+    date: '22 December, 2023',
+    content: {
+      title: 'Great chair for the price. Looks good.',
+      body: 'Easy to put together. Packaged VERY well with red tape and string for the hardware package. Extra bolt just in case and the hex screw for assembly.',
+    },
+    helpfulCount: 130,
+  },
+  {
+    id: 3,
+    user: {
+      name: 'Kento Nanami',
+      image: users[4].avatar,
+    },
+    rating: 5,
+    date: '22 December, 2023',
+    content: {
+      title: 'Easily one of the bests in the market.',
+      body: 'Looks great feels great, totally comfortable. I would recommend.',
+    },
+    helpfulCount: 130,
+  },
+];
+
+export const productDescriptions = [
+  {
+    title: 'Modern Looking',
+    description:
+      'Go for a modern option with our brown leather love seat. It has a sleek yet classic look that can brings contemporary style to your space without sacrificing comfort.Comes in a handful of colors,with fabric,velvet,corduroy and pu leather options. ',
+  },
+  {
+    title: 'Plush and Comfy Cushions',
+    description:
+      'High-density sponge and metal pocket coils are adopted to offer ideal comfort,its plush cushions and ergonomic design cradles you in relaxation,making it the perfect spot to unwind after a long day.',
+  },
+  {
+    title: 'Made to Last',
+    description:
+      'When it comes to quality sofa couch,the frame and seating support is always non-concessional,wooden frames,durable metal legs and metal backrests offer superior stability and ensure its ability to retain its shape and stability in the years to come.',
+  },
+  {
+    title: 'Easy Assembly',
+    description:
+      'Assembly is a breeze with straightforward instructions and minimal steps,allowing you to enjoy your new small couch in no time.The cushions have been vacuum packed,it may take up to 2-3days to fully expand to its original shape.',
+  },
+  {
+    title: 'Versatile Loveseat',
+    description:
+      'It has a small footprint to fit into any small spaces,sunroom, living room,bedroom or office.',
+  },
+];
+
+export const productSpecifications = [
+  { label: 'Brand', value: 'VIngli' },
+  { label: 'Assembly required', value: 'Yes' },
+  { label: 'Fabric', value: '100% Cotton' },
+  { label: 'Dimensions', value: '56.7" depth x 31.8" width x 33" height' },
+  { label: 'Seat Depth', value: '21.2 inches' },
+  { label: 'Seat Height', value: '18.1 inches' },
+  { label: 'Item Weight', value: '66 pounds' },
+  { label: 'Frame', value: 'Plywood, Polyurethane foam, Particleboard, PVA glue, Solid wood' },
+  { label: 'Leg', value: 'Solid wood, Polished aluminium' },
+  { label: 'Cushion', value: 'Cotton, Polyurethane foam' },
+];
+
+export const ecomCoupons = [{ code: 'TAKE100', discount: 100, appliedDiscount: 100 }];
+
+export const productListAdmin = [
+  {
+    id: 1,
+    name: 'Fotobi 47" Black Wood Loveseat Sofa',
+    image: { src: image('1') },
+    category: 'Sofa',
+    status: 'active',
+    price: {
+      regular: 440,
+      discounted: 259,
+    },
+    vendor: 'Fotobi Furniture',
+    stock: 2,
+    publishedAt: '14 Feb, 23',
+  },
+  {
+    id: 2,
+    name: 'Fabric Recliner Chair Single Sofa',
+    image: { src: image('2') },
+    category: 'Chair',
+    status: 'inactive',
+    price: {
+      regular: 400,
+      discounted: 109,
+    },
+    vendor: 'Mojar Furniture',
+    stock: 23,
+    publishedAt: '14 Feb, 23',
+  },
+  {
+    id: 3,
+    name: 'T- CAP  2 Seat Cotton Sofa',
+    image: { src: image('3') },
+    category: 'Sofa',
+    status: 'active',
+    price: {
+      regular: 2000,
+      discounted: 1099,
+    },
+    vendor: 'T-CAP Living',
+    stock: 12,
+    publishedAt: '15 Feb, 23',
+  },
+  {
+    id: 4,
+    name: 'Little Smile 3X6 size for 1 Person- Moshi Fabric Washable Cover',
+    image: { src: image('4') },
+    category: 'Sofa',
+    status: 'draft',
+    price: {
+      regular: 740,
+      discounted: 369,
+    },
+    vendor: 'Little Smile Ltd.',
+    stock: 54,
+    publishedAt: '16 Feb, 23',
+  },
+  {
+    id: 5,
+    name: 'Century Accent Chair, Modern Fabric Upholstered Armchair',
+    image: { src: image('5') },
+    category: 'Chair',
+    status: 'active',
+    price: {
+      regular: 600,
+      discounted: 299,
+    },
+    vendor: 'Home Furniture',
+    stock: 45,
+    publishedAt: '16 Feb, 23',
+  },
+  {
+    id: 6,
+    name: 'Velvet Swoop Arm Accent Chair',
+    image: { src: image('6') },
+    category: 'Chair',
+    status: 'inactive',
+    price: {
+      regular: 280,
+      discounted: 109,
+    },
+    vendor: 'Milano Accent Decor',
+    stock: 16,
+    publishedAt: '17 Feb, 23',
+  },
+  {
+    id: 7,
+    name: 'Mid-Century Accent Arm Modern Retro Chair with Solid Wood Frame',
+    image: { src: image('7') },
+    category: 'Chair',
+    status: 'active',
+    price: {
+      regular: 120,
+      discounted: 59,
+    },
+    vendor: 'Fotobi Furniture',
+    stock: 34,
+    publishedAt: '18 Feb, 23',
+  },
+  {
+    id: 8,
+    name: 'Stuffed Animal Storage Bean Bag Chair Cover (No Filler)',
+    image: { src: image('8') },
+    category: 'Bean Bag',
+    status: 'archive',
+    price: {
+      regular: 160,
+      discounted: 79,
+    },
+    vendor: 'Mojar Furniture',
+    stock: 25,
+    publishedAt: '18 Feb, 23',
+  },
+  {
+    id: 9,
+    name: 'Leisure Sofa Single Lazy Sofa Hotel Bar Small Apartment',
+    image: { src: image('9') },
+    category: 'Sofa',
+    status: 'active',
+    price: {
+      regular: 360,
+      discounted: 229,
+    },
+    vendor: 'T-CAP Living',
+    stock: 19,
+    publishedAt: '18 Feb, 23',
+  },
+  {
+    id: 10,
+    name: 'T-Pop Modern Barrel Accent Chair, Button Tufted Beige Solid Woven',
+    image: { src: image('10') },
+    category: 'Chair',
+    status: 'active',
+    price: {
+      regular: 260,
+      discounted: 169,
+    },
+    vendor: 'Milano Accent Decor',
+    stock: 15,
+    publishedAt: '19 Feb, 23',
+  },
+  {
+    id: 11,
+    name: 'Life.an 38.6" W Modern Style Rolled Arm Chair Sofa',
+    image: { src: image('11') },
+    category: 'Sofa',
+    status: 'inactive',
+    price: {
+      regular: 440,
+      discounted: 319,
+    },
+    vendor: 'Fotobi Furniture',
+    stock: 7,
+    publishedAt: '21 Feb, 23',
+  },
+  {
+    id: 12,
+    name: 'Milano Accent Chair Modern Retro Leisure Chair with Solid Wood Frame',
+    image: { src: image('12') },
+    category: 'Chair',
+    status: 'active',
+    price: {
+      regular: 420,
+      discounted: 239,
+    },
+    vendor: 'Milano Accent Decor',
+    stock: 33,
+    publishedAt: '22 Feb, 23',
+  },
+  {
+    id: 13,
+    name: 'AIA Tri-Fold Wooden effect leg/Sofa',
+    image: { src: image('13') },
+    category: 'Sofa',
+    status: 'draft',
+    price: {
+      regular: 240,
+      discounted: 189,
+    },
+    vendor: 'T-CAP Living',
+    stock: 5,
+    publishedAt: '22 Feb, 23',
+  },
+  {
+    id: 14,
+    name: 'AIA Home Furniture Series Classic Linen Wooden Leg, Armchair',
+    image: { src: image('14') },
+    category: 'Chair',
+    status: 'active',
+    price: {
+      regular: 360,
+      discounted: 229,
+    },
+    vendor: 'Home Furniture',
+    stock: 20,
+    publishedAt: '24 Feb, 23',
+  },
+  {
+    id: 15,
+    name: 'T-Pop Swoop Arm Chair',
+    image: { src: image('15') },
+    category: 'Chair',
+    status: 'archive',
+    price: {
+      regular: 700,
+      discounted: 459,
+    },
+    vendor: 'Milano Accent Decor',
+    stock: 27,
+    publishedAt: '24 Feb, 23',
+  },
+];
+
+export const availabilityFilterOptions = [
+  {
+    label: 'In stock',
+    value: 'in-stock',
+  },
+  {
+    label: 'Low Stock',
+    value: 'low-stock',
+  },
+  {
+    label: 'Out of stock',
+    value: 'out-of-stock',
+  },
+];
+
+export const saleFilterOptions = [
+  {
+    label: 'Clearance sale',
+    value: 'clearance-sale',
+  },
+  {
+    label: 'Voucher',
+    value: 'voucher',
+  },
+  {
+    label: 'Regular price',
+    value: 'regular-price',
+  },
+];
+
+export const materialFilterOptions = [
+  {
+    label: 'Cotton',
+    value: 'cotton',
+  },
+  {
+    label: 'Upholstered',
+    value: 'polyester',
+  },
+  {
+    label: 'Metal',
+    value: 'metal',
+  },
+  {
+    label: 'Wood',
+    value: 'wood',
+  },
+  {
+    label: 'Plastic',
+    value: 'plastic',
+  },
+  {
+    label: 'Glass',
+    value: 'glass',
+  },
+];
+
+export const categoryFilterOptions = [
+  {
+    label: 'Chair',
+    value: 'chair',
+  },
+  {
+    label: 'Divan',
+    value: 'divan',
+  },
+  {
+    label: 'Sofa',
+    value: 'sofa',
+  },
+  {
+    label: 'Sectional',
+    value: 'sectional',
+  },
+  {
+    label: 'Loveseat',
+    value: 'loveseat',
+  },
+  {
+    label: 'Recliner',
+    value: 'recliner',
+  },
+  {
+    label: 'Bench',
+    value: 'bench',
+  },
+  {
+    label: 'Ottoman',
+    value: 'ottoman',
+  },
+];
+
+export const featuresFilterOptions = [
+  {
+    label: 'Outdoor',
+    value: 'outdoor',
+  },
+  {
+    label: 'Adjustable',
+    value: 'adjustable',
+  },
+  {
+    label: 'Swivel',
+    value: 'swivel',
+  },
+  {
+    label: 'Handmade',
+    value: 'handmade',
+  },
+  {
+    label: 'Ergonomic',
+    value: 'ergonomic',
+  },
+  {
+    label: 'Stackable',
+    value: 'stackable',
+  },
+  {
+    label: 'Foldable',
+    value: 'foldable',
+  },
+  {
+    label: 'Waterproof',
+    value: 'waterproof',
+  },
+];
+
+export const defaultProductFilterOptions = {
+  availability: availabilityFilterOptions,
+  sale: saleFilterOptions,
+  material: materialFilterOptions,
+  category: categoryFilterOptions,
+  features: featuresFilterOptions,
+  price: [0, 1500],
+};
