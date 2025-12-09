@@ -57,6 +57,7 @@ export default function App() {
     return localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
   });
   const allowedPagesRef = useRef<string[] | null>(null);
+  const navTokenRef = useRef<string | null>(null);
   const showNav = !["landing", "login", "dashboard"].includes(route);
 
   const setHash = (id: RouteId) => {
@@ -72,22 +73,20 @@ export default function App() {
 
   const ensureClientNavigation = useCallback(
     async (token?: string): Promise<string[]> => {
-      if (allowedPagesRef.current) return allowedPagesRef.current;
+      const storedToken = token ?? (localStorage.getItem("astraai:auth:token") || undefined);
+      const tokenMarker = storedToken ?? null;
 
-      // Use cached navigation only if we still have a token; otherwise force a fresh check.
-      if (token && navEntries.length) {
-        const cachedName =
-          localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
-        if (cachedName) {
-          setUserName((prev) => prev || cachedName);
-        }
-        const pages = navEntries
-          .map((entry) => (entry && typeof entry === "object" ? (entry as any).page : null))
-          .filter((p: unknown): p is string => Boolean(p));
-        allowedPagesRef.current = pages;
-        return pages;
+      if (allowedPagesRef.current && navTokenRef.current === tokenMarker) {
+        return allowedPagesRef.current;
       }
-      const profile = await fetchCurrentAdmin(token);
+
+      const cachedName =
+        localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
+      if (cachedName) {
+        setUserName((prev) => prev || cachedName);
+      }
+
+      const profile = await fetchCurrentAdmin(storedToken);
       const entries = Array.isArray((profile as any).clientNavigation)
         ? (profile as any).clientNavigation
         : [];
@@ -96,6 +95,7 @@ export default function App() {
         .map((entry: any) => entry?.page)
         .filter((p: unknown): p is string => Boolean(p));
       allowedPagesRef.current = pages;
+      navTokenRef.current = tokenMarker;
       if (profile && typeof (profile as any).username === "string") {
         setUserName((profile as any).username);
         localStorage.setItem(USERNAME_CACHE_KEY, (profile as any).username);
@@ -108,7 +108,7 @@ export default function App() {
       }
       return pages;
     },
-    [navEntries]
+    []
   );
 
   const guardAndNavigate = useCallback(
@@ -137,6 +137,8 @@ export default function App() {
         }
         localStorage.removeItem(NAV_CACHE_KEY);
         localStorage.removeItem(USERNAME_CACHE_KEY);
+        allowedPagesRef.current = null;
+        navTokenRef.current = null;
         redirectTo("login", fromHashChange);
       } finally {
         setPendingRoute(null);
@@ -171,7 +173,7 @@ export default function App() {
       default:
         return <NotFoundPage />;
     }
-  }, [route]);
+  }, [route, navEntries, userName]);
 
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900">

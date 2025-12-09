@@ -58,20 +58,26 @@ jobs:
 
           echo "✅ Controllo superato, proseguo con il deploy..."
 
-      - name: Leggi versione da release.json
+      - name: Leggi versione da public/release.json
         id: version
         run: |
-          if [[ ! -f release.json ]]; then
-            echo "❌ release.json non trovato!"
+          RELEASE_FILE="public/release.json"
+
+          if [[ ! -f "$RELEASE_FILE" ]]; then
+            echo "❌ $RELEASE_FILE non trovato!"
             exit 1
           fi
-          VERSION=$(jq -r '.version' release.json)
+
+          VERSION=$(jq -r '.version' "$RELEASE_FILE")
+
           if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
-            echo "❌ Campo .version non valido in release.json"
+            echo "❌ Campo .version non valido in $RELEASE_FILE"
             exit 1
           fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "🏷 Versione frontend: $VERSION"
+
 
       - name: Build and push frontend image (solo PAPER)
         if: ${{ github.ref_name == 'PAPER' }}

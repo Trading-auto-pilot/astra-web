@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Logo from "../components/atoms/media/Logo";
 import UserMenu from "../components/molecules/navigation/UserMenu";
+import { useRelease } from "../hooks/useReleaseInfo";
 
 export type MainLayoutProps = {
   children: ReactNode;
@@ -46,6 +47,7 @@ export function MainLayout({
 }: MainLayoutProps) {
   // Title is available for future heading usage.
   void title;
+  const release = useRelease();
   const navLinks = buildNavLinks(navEntries);
   const currentHash = typeof window !== "undefined" ? window.location.hash || "#/dashboard" : "#/dashboard";
 
@@ -53,6 +55,9 @@ export function MainLayout({
     <div className="flex min-h-screen bg-slate-50">
       <aside className="hidden w-60 flex-col border-r border-slate-200 bg-white p-4 md:flex">
         <Logo />
+        <div className="mt-3 flex items-center justify-end text-xs text-slate-400">
+          <span>versione {(release as any)?.version ?? "-"}</span>
+        </div>
         <nav className="mt-6 space-y-2 text-sm text-slate-700">
           {navLinks.map((link) => {
             const isActive =

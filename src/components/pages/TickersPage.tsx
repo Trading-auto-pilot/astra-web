@@ -4,6 +4,16 @@ import SectionHeader from "../molecules/content/SectionHeader";
 
 type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total";
 
+const getHashSymbol = () => {
+  if (typeof window === "undefined") return null;
+  const cleaned = window.location.hash.replace(/^#\/?/, "");
+  const parts = cleaned.split("/");
+  if (parts[0] === "dashboard" && parts[1] === "tickers" && parts[2]) {
+    return decodeURIComponent(parts[2]);
+  }
+  return null;
+};
+
 const clampScore = (value: number) => Math.max(0, Math.min(100, value));
 
 const parseScore = (value: unknown): number | null => {
@@ -26,6 +36,9 @@ export function TickersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("total");
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(() => getHashSymbol());
+  const [selectedRecord, setSelectedRecord] = useState<FundamentalRecord | null>(null);
+  const [showDetails, setShowDetails] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +66,26 @@ export function TickersPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const syncSymbol = () => {
+      setSelectedSymbol(getHashSymbol());
+    };
+    window.addEventListener("hashchange", syncSymbol);
+    return () => window.removeEventListener("hashchange", syncSymbol);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSymbol) {
+      setSelectedRecord(null);
+      return;
+    }
+    const found = records.find((item) => {
+      const symbol = (item as any).ticker || (item as any).symbol;
+      return typeof symbol === "string" && symbol.toUpperCase() === selectedSymbol.toUpperCase();
+    });
+    setSelectedRecord(found ?? null);
+  }, [records, selectedSymbol]);
 
   const topRows = useMemo(() => {
     const scoreKeyMap: Record<SortKey, string[]> = {
@@ -85,6 +118,125 @@ export function TickersPage() {
 
     return sorted.slice(0, 50);
   }, [records, sortKey]);
+
+  const detailRows = useMemo(() => {
+    if (!selectedRecord) return [];
+    const rows: { key: string; value: string }[] = [];
+
+    Object.entries(selectedRecord).forEach(([key, value]) => {
+      if (key === "momentum_json") {
+        let parsed: any = null;
+        if (typeof value === "string") {
+          try {
+            parsed = JSON.parse(value);
+          } catch {
+            parsed = value;
+          }
+        } else {
+          parsed = value;
+        }
+
+        if (parsed && typeof parsed === "object") {
+          Object.entries(parsed as Record<string, unknown>).forEach(([k, v]) => {
+            let display = "-";
+            if (v === null || v === undefined) display = "-";
+            else if (typeof v === "number" || typeof v === "boolean") display = String(v);
+            else if (typeof v === "string") display = v;
+            else if (Array.isArray(v)) display = v.length ? JSON.stringify(v) : "[]";
+            else if (typeof v === "object") display = JSON.stringify(v);
+            rows.push({ key: `momentum_json.${k}`, value: display });
+          });
+          return;
+        }
+      }
+
+      let display = "-";
+      if (value === null || value === undefined) {
+        display = "-";
+      } else if (typeof value === "number" || typeof value === "boolean") {
+        display = String(value);
+      } else if (typeof value === "string") {
+        display = value;
+      } else if (Array.isArray(value)) {
+        display = value.length ? JSON.stringify(value) : "[]";
+      } else if (typeof value === "object") {
+        display = JSON.stringify(value);
+      }
+      rows.push({ key, value: display });
+    });
+
+    return rows;
+  }, [selectedRecord]);
+
+  if (selectedSymbol) {
+    const name =
+      (selectedRecord as any)?.name ||
+      (selectedRecord as any)?.companyName ||
+      (selectedRecord as any)?.company ||
+      selectedSymbol;
+
+    return (
+      <div className="space-y-4">
+        <SectionHeader
+          title="Ticker detail"
+          subTitle="Visualizza le informazioni del singolo ticker"
+          actionComponent={
+            <button
+              onClick={() => {
+                window.location.hash = "/dashboard/tickers";
+                setSelectedSymbol(null);
+              }}
+              className="text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              ← Torna alla lista
+            </button>
+          }
+        />
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Ticker
+          </div>
+          <div className="mt-1 text-3xl font-bold text-slate-900">{selectedSymbol}</div>
+          <div className="mt-2 text-xl font-semibold text-slate-800">{name}</div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <SectionHeader title="Dettaglio" subTitle="Tutti i campi disponibili per il ticker" />
+            <button
+              onClick={() => setShowDetails((v) => !v)}
+              className="text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              {showDetails ? "Nascondi" : "Mostra"}
+            </button>
+          </div>
+
+          {showDetails && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-4">
+              {detailRows.length ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {detailRows.map((row) => (
+                    <div
+                      key={row.key}
+                      className="rounded-lg border border-slate-100 bg-white px-3 py-3 shadow-sm"
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {row.key}
+                      </div>
+                      <div className="mt-1 break-words text-sm text-slate-800">{row.value}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-2 py-3 text-sm text-slate-500">Nessun dettaglio disponibile.</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -160,8 +312,32 @@ export function TickersPage() {
                   ];
 
                   return (
-                    <tr key={`${symbol}-${idx}`} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-semibold text-slate-900">{symbol}</td>
+                    <tr
+                      key={`${symbol}-${idx}`}
+                      className="cursor-pointer hover:bg-slate-50"
+                      onClick={() => {
+                        if (symbol && symbol !== "-") {
+                          window.location.hash = `#/dashboard/tickers/${encodeURIComponent(symbol)}`;
+                          setSelectedSymbol(symbol);
+                        }
+                      }}
+                    >
+                      <td className="px-4 py-3 font-semibold text-slate-900">
+                        <div className="flex items-center gap-3">
+                          {symbol && (
+                            <img
+                              src={`https://financialmodelingprep.com/image-stock/${symbol}.png`}
+                              alt={`${symbol} logo`}
+                              className="h-8 w-8 rounded-md border border-slate-200 bg-white object-contain"
+                              onError={(e) => {
+                                // Hide broken logos without breaking layout.
+                                e.currentTarget.style.visibility = "hidden";
+                              }}
+                            />
+                          )}
+                          <span>{symbol}</span>
+                        </div>
+                      </td>
                       <td className="px-4 py-3">{item.sector || "-"}</td>
                       <td className="px-4 py-3">{item.industry || "-"}</td>
                       <td className="px-4 py-3">{(item as any).country || "-"}</td>
