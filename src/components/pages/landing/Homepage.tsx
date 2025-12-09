@@ -4,7 +4,9 @@ import { useRelease } from "../../../hooks/useReleaseInfo";
 
 export default function Homepage() {
   const release = useRelease();
-  const notes = Array.isArray((release as any)?.note) ? (release as any).note : [];
+  const notes: string[] = Array.isArray((release as any)?.note)
+    ? (release as any).note.map((item: unknown) => String(item))
+    : [];
 
   return (
     <LandingLayout backgroundImage="/background/landing/space.jpeg">
@@ -49,7 +51,7 @@ export default function Homepage() {
               <div className="font-medium text-slate-600">Note</div>
               <div className="sm:col-span-2 space-y-1 text-slate-900">
                 {notes.length ? (
-                  notes.map((item, idx) => (
+                  notes.map((item: string, idx: number) => (
                     <div key={`${idx}-${item}`} className="rounded-md bg-slate-50 px-3 py-2">
                       {item}
                     </div>
