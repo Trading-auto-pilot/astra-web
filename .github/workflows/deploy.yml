@@ -94,41 +94,34 @@ jobs:
 
       - name: Deploy frontend su server
         run: |
-          ssh -o StrictHostKeyChecking=no $GCP_USER@$GCP_HOST "ENV_NAME=${{ github.ref_name }} bash -s" << 'EOF'
+          VERSION="${{ vars.ASTRAAI_VERSION }}"
+
+          ssh -o StrictHostKeyChecking=no $GCP_USER@$GCP_HOST "ENV_NAME=${{ github.ref_name }} VERSION=$VERSION bash -s" << 'EOF'
             cd ~/deploy
 
-            # ENV_NAME = PAPER o LIVE
             LOWER_ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]')
             COMPOSE_FILE="docker-compose.${LOWER_ENV_NAME}.yml"
+            LOWER_PROJECT_NAME="$LOWER_ENV_NAME"
 
             if [[ ! -f ".env" ]]; then
-              echo "❌ .env non trovato in ~/deploy (deve contenere ASTRAAI_FRONTEND_VERSION)"
+              echo "❌ .env non trovato in ~/deploy"
               exit 1
             fi
 
-            # carico le variabili (.env già gestito dal backend pipeline)
-            set -a
-            . .env
-            set +a
-
-            if [[ -z "$ASTRAAI_FRONTEND_VERSION" ]]; then
-              echo "⚠️ ASTRAAI_FRONTEND_VERSION non impostata in .env, userò :latest"
-              ASTRAAI_FRONTEND_VERSION="latest"
+            # 🔁 aggiorna/aggiungi ASTRAAI_VERSION nel .env
+            if grep -q '^ASTRAAI_VERSION=' .env; then
+              sed -i "s/^ASTRAAI_VERSION=.*/ASTRAAI_VERSION=$VERSION/" .env
+            else
+              echo "ASTRAAI_VERSION=$VERSION" >> .env
             fi
 
-            LOWER_PROJECT_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]')
-
-            echo "📥 Pull immagine frontend versione: $ASTRAAI_FRONTEND_VERSION"
+            echo "📥 Pull immagine expovin/astraai-frontend:$VERSION"
             docker compose -f "$COMPOSE_FILE" --env-file .env -p "$LOWER_PROJECT_NAME" pull astraai-frontend
 
-            echo "▶️ Avvio servizi tramite deploy-with-profiles.sh"
-            if [[ ! -f "./deploy-with-profiles.sh" ]]; then
-              echo "❌ deploy-with-profiles.sh non trovato in ~/deploy"
-              exit 1
-            fi
-
-            ./deploy-with-profiles.sh "$ENV_NAME" "$COMPOSE_FILE" ".env"
+            echo "🚀 Riavvio solo astraai-frontend"
+            docker compose -f "$COMPOSE_FILE" --env-file .env -p "$LOWER_PROJECT_NAME" up -d --no-deps --force-recreate astraai-frontend
 
             echo "🧹 Pulizia immagini inutilizzate"
             docker image prune -a -f
           EOF
+
