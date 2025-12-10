@@ -40,9 +40,9 @@ export function TickersPage() {
   const [sortKey, setSortKey] = useState<SortKey>("total");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(() => getHashSymbol());
   const [selectedRecord, setSelectedRecord] = useState<FundamentalRecord | null>(null);
-  const [showDetails, setShowDetails] = useState(true);
   const [fmpInfo, setFmpInfo] = useState<any | null>(null);
   const [fmpStatus, setFmpStatus] = useState<"idle" | "loading" | "error" | "no-key">("idle");
+  const [infoTab, setInfoTab] = useState<"detail" | "statement">("detail");
 
   useEffect(() => {
     let active = true;
@@ -539,41 +539,68 @@ export function TickersPage() {
             </div>
           )}
         </div>
-
-
-
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <SectionHeader title="Dettaglio" subTitle="Tutti i campi disponibili per il ticker" />
-            <button
-              onClick={() => setShowDetails((v) => !v)}
-              className="text-sm font-medium text-blue-600 hover:text-blue-700"
-            >
-              {showDetails ? "Nascondi" : "Mostra"}
-            </button>
+            <div className="flex gap-2">
+              {[
+                { id: "detail" as const, label: "Dettaglio" },
+                { id: "statement" as const, label: "Statement" },
+              ].map((tab) => {
+                const active = infoTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setInfoTab(tab.id)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      active
+                        ? "border-slate-800 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {showDetails && (
-            <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-4">
-              {detailRows.length ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {detailRows.map((row) => (
-                    <div
-                      key={row.key}
-                      className="rounded-lg border border-slate-100 bg-white px-3 py-3 shadow-sm"
-                    >
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {row.key}
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-4">
+            {infoTab === "detail" ? (
+              detailRows.length ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                  {(() => {
+                    const cols = [[], [], []] as { key: string; value: string }[][];
+                    detailRows.forEach((row, idx) => {
+                      cols[idx % 3].push(row);
+                    });
+                    return cols.map((col, colIdx) => (
+                      <div key={`col-${colIdx}`} className="rounded-lg border border-slate-200 bg-white/80">
+                        <table className="w-full text-sm">
+                          <tbody className="divide-y divide-slate-100">
+                            {col.map((row) => (
+                              <tr key={row.key}>
+                                <td className="w-32 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                                  {row.key}
+                                </td>
+                                <td className="px-3 py-2 text-[12px] text-slate-800 break-words">
+                                  {row.value}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                      <div className="mt-1 break-words text-sm text-slate-800">{row.value}</div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               ) : (
                 <div className="px-2 py-3 text-sm text-slate-500">Nessun dettaglio disponibile.</div>
-              )}
-            </div>
-          )}
+              )
+            ) : (
+              <div className="text-sm text-slate-700">Statement contenuti non disponibili al momento.</div>
+            )}
+          </div>
         </div>
       </div>
     );
