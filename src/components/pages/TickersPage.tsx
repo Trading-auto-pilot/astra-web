@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchFundamentals, type FundamentalRecord } from "../../api/fundamentals";
+import { fetchFundamentals, fetchFmpVariant, type FundamentalRecord } from "../../api/fundamentals";
 import SectionHeader from "../molecules/content/SectionHeader";
+import ReactApexChart from "react-apexcharts";
+import ReactCountryFlag from "react-country-flag";
 
 type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total";
 
@@ -39,6 +41,8 @@ export function TickersPage() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(() => getHashSymbol());
   const [selectedRecord, setSelectedRecord] = useState<FundamentalRecord | null>(null);
   const [showDetails, setShowDetails] = useState(true);
+  const [fmpInfo, setFmpInfo] = useState<any | null>(null);
+  const [fmpStatus, setFmpStatus] = useState<"idle" | "loading" | "error" | "no-key">("idle");
 
   useEffect(() => {
     let active = true;
@@ -78,6 +82,8 @@ export function TickersPage() {
   useEffect(() => {
     if (!selectedSymbol) {
       setSelectedRecord(null);
+      setFmpInfo(null);
+      setFmpStatus("idle");
       return;
     }
     const found = records.find((item) => {
@@ -86,6 +92,38 @@ export function TickersPage() {
     });
     setSelectedRecord(found ?? null);
   }, [records, selectedSymbol]);
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    let active = true;
+    const controller = new AbortController();
+    setFmpStatus("loading");
+
+    fetchFmpVariant(selectedSymbol, controller.signal)
+      .then((doc) => {
+        if (!active) return;
+        if (doc) {
+          console.log("FMP selected document", doc);
+        }
+        setFmpInfo(doc);
+        setFmpStatus("idle");
+      })
+      .catch((err) => {
+        if (!active || err.name === "AbortError") return;
+        console.error("FMP fetch error", err);
+        setFmpInfo(null);
+        if (err.message === "Missing FMP API key") {
+          setFmpStatus("no-key");
+        } else {
+          setFmpStatus("error");
+        }
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [selectedSymbol]);
 
   const topRows = useMemo(() => {
     const scoreKeyMap: Record<SortKey, string[]> = {
@@ -168,10 +206,93 @@ export function TickersPage() {
     return rows;
   }, [selectedRecord]);
 
+  const radarData = useMemo(() => {
+    const get = (keyList: string[]) => {
+      if (!selectedRecord) return null;
+      for (const key of keyList) {
+        const value = (selectedRecord as any)[key];
+        const parsed = parseScore(value);
+        if (parsed !== null) return parsed;
+      }
+      return null;
+    };
+
+    const metrics: { label: string; value: number | null }[] = [
+      { label: "Momentum", value: get(["momentum_score"]) },
+      { label: "Quality", value: get(["quality_score"]) },
+      { label: "Risk", value: get(["risk_score"]) },
+      { label: "Valuation", value: get(["valuation_score", "valuation_scores"]) },
+      { label: "Total", value: get(["total_score", "score", "totalScore"]) },
+    ];
+
+    const filtered = metrics.filter((m) => m.value !== null);
+    if (!filtered.length) return null;
+
+    return {
+      categories: filtered.map((m) => m.label),
+      values: filtered.map((m) => m.value as number),
+    };
+  }, [selectedRecord]);
+
+  const descriptionInfo = useMemo(() => {
+    const raw = (fmpInfo as any)?.description;
+    if (!raw || typeof raw !== "string") return null;
+    const words = raw.trim().split(/\s+/);
+    if (words.length <= 50) {
+      return { preview: raw, remainder: "" };
+    }
+    const previewWords = words.slice(0, 50).join(" ");
+    const remainder = words.slice(50).join(" ");
+    return { preview: `${previewWords}...`, full: raw, remainder };
+  }, [fmpInfo]);
+
+  const priceInfo = useMemo(() => {
+    const rawPrice = (fmpInfo as any)?.price;
+    const price = typeof rawPrice === "number" ? rawPrice : Number(rawPrice);
+    const rangeStr = typeof (fmpInfo as any)?.range === "string" ? (fmpInfo as any).range : "";
+    let min = Number.NaN;
+    let max = Number.NaN;
+    if (rangeStr.includes("-")) {
+      const [l, h] = rangeStr.split("-").map((p: string) => parseFloat(p.trim()));
+      if (Number.isFinite(l) && Number.isFinite(h)) {
+        min = l;
+        max = h;
+      }
+    }
+    if ((!Number.isFinite(min) || !Number.isFinite(max)) && Number.isFinite(price)) {
+      min = Math.max(price * 0.9, 0);
+      max = price * 1.1;
+    }
+    return { price: Number.isFinite(price) ? price : null, min: Number.isFinite(min) ? min : null, max: Number.isFinite(max) ? max : null };
+  }, [fmpInfo]);
+
+  const formatNumber = (value: number | null) => {
+    if (value === null || Number.isNaN(value)) return "-";
+    return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+  };
+
+  const formatCurrency = (value: number | null, currency: string | undefined) => {
+    if (value === null || Number.isNaN(value)) return "-";
+    if (currency) {
+      try {
+        return new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency,
+          maximumFractionDigits: 0,
+        }).format(value);
+      } catch {
+        // fallback
+      }
+    }
+    return `${formatNumber(value)} ${currency ?? ""}`.trim();
+  };
+
   if (selectedSymbol) {
     const name =
-      (selectedRecord as any)?.name ||
+      (fmpInfo as any)?.companyName ||
+      (fmpInfo as any)?.name ||
       (selectedRecord as any)?.companyName ||
+      (selectedRecord as any)?.name ||
       (selectedRecord as any)?.company ||
       selectedSymbol;
 
@@ -194,12 +315,232 @@ export function TickersPage() {
         />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Ticker
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="flex flex-col gap-3">
+              <div className="flex items-start gap-4">
+                {selectedSymbol && (
+                  <div className="flex min-w-[90px] flex-col items-center gap-2">
+                    <img
+                      src={`https://financialmodelingprep.com/image-stock/${selectedSymbol}.png`}
+                      alt={`${selectedSymbol} logo`}
+                      className="h-14 w-14 rounded-lg border border-slate-200 bg-white object-contain"
+                      onError={(e) => {
+                        e.currentTarget.style.visibility = "hidden";
+                      }}
+                    />
+                    <div className="text-lg">
+                      {(fmpInfo as any)?.country && (
+                        <ReactCountryFlag
+                          countryCode={(fmpInfo as any)?.country}
+                          svg
+                          aria-label={(fmpInfo as any)?.country}
+                          style={{ width: "1.5em", height: "1.5em" }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <div className="mt-1 text-3xl font-bold text-slate-900">{name}</div>
+                  <div className="mt-2 text-sm text-slate-600">
+                    Ticker: {selectedSymbol}
+                    {((fmpInfo as any)?.exchange && ` (${(fmpInfo as any)?.exchange})`) || ""}
+                  </div>
+                  <div className="mt-2 text-xs uppercase tracking-wide text-slate-500">Price</div>
+                  {priceInfo.price !== null ? (
+                    <div className="mt-1">
+                      <div className="flex items-center justify-between text-xs text-slate-600">
+                        <span>{priceInfo.min !== null ? formatNumber(priceInfo.min) : "-"}</span>
+                        <span className="font-semibold text-slate-900">
+                          {formatNumber(priceInfo.price)}
+                        </span>
+                        <span>{priceInfo.max !== null ? formatNumber(priceInfo.max) : "-"}</span>
+                      </div>
+                      <div className="relative mt-1 h-2 rounded-full bg-slate-100">
+                        {priceInfo.min !== null &&
+                        priceInfo.max !== null &&
+                        priceInfo.price !== null ? (
+                          <div
+                            className="absolute top-0 h-2 w-1.5 rounded-full bg-blue-500"
+                            style={{
+                              left: `${Math.min(
+                                100,
+                                Math.max(
+                                  0,
+                                  ((priceInfo.price - priceInfo.min) /
+                                    (priceInfo.max - priceInfo.min || 1)) *
+                                    100
+                                )
+                              )}%`,
+                              transform: "translateX(-50%)",
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-sm text-slate-500">-</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-1 max-w-md rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-700">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                  <div className="font-semibold text-slate-600">Industry</div>
+                  <div>{(fmpInfo as any)?.industry ?? (selectedRecord as any)?.industry ?? "-"}</div>
+                  <div className="font-semibold text-slate-600">Sector</div>
+                  <div>{(fmpInfo as any)?.sector ?? (selectedRecord as any)?.sector ?? "-"}</div>
+                  <div className="font-semibold text-slate-600">Full Time Employees</div>
+                  <div>
+                    {formatNumber(
+                      typeof (fmpInfo as any)?.fullTimeEmployees === "number"
+                        ? (fmpInfo as any)?.fullTimeEmployees
+                        : Number((fmpInfo as any)?.fullTimeEmployees)
+                    )}
+                  </div>
+                  <div className="font-semibold text-slate-600">Market Cap</div>
+                  <div>
+                    {formatCurrency(
+                      typeof (fmpInfo as any)?.mktCap === "number"
+                        ? (fmpInfo as any)?.mktCap
+                        : Number((fmpInfo as any)?.mktCap),
+                      (fmpInfo as any)?.currency
+                    )}{" "}
+                    {(fmpInfo as any)?.currency ?? ""}
+                  </div>
+                  <div className="font-semibold text-slate-600">Last Dividend</div>
+                  <div>
+                    {formatCurrency(
+                      typeof (fmpInfo as any)?.lastDiv === "number"
+                        ? (fmpInfo as any)?.lastDiv
+                        : Number((fmpInfo as any)?.lastDiv),
+                      (fmpInfo as any)?.currency
+                    )}{" "}
+                    {(fmpInfo as any)?.currency ?? ""}
+                  </div>
+                </div>
+              </div>
+
+              {descriptionInfo && (
+                <div className="mt-3 text-[10px] text-slate-700">
+                  {descriptionInfo.preview}{" "}
+                  {descriptionInfo.remainder && (
+                    <button
+                      className="text-blue-600 hover:text-blue-700 underline underline-offset-2"
+                      onClick={() => {
+                        window.alert(descriptionInfo.full ?? "");
+                      }}
+                    >
+                      more..
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="text-right text-xs text-slate-600 leading-snug space-y-1">
+              <div>{(fmpInfo as any)?.address ?? "-"}</div>
+              <div>
+                {(fmpInfo as any)?.city ?? "-"}
+                {((fmpInfo as any)?.state && `, ${(fmpInfo as any)?.state}`) || ""}
+                {((fmpInfo as any)?.zip && ` ${String((fmpInfo as any)?.zip)}`) || ""}
+              </div>
+              <div>
+                <a
+                  href={(fmpInfo as any)?.website ?? "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:text-blue-700 underline underline-offset-2"
+                >
+                  {(fmpInfo as any)?.website ?? "-"}
+                </a>
+              </div>
+              <div>
+                <span className="font-semibold text-slate-800">
+                  {(fmpInfo as any)?.CEO || (fmpInfo as any)?.ceo || "-"}
+                </span>
+              </div>
+              <div className="flex items-center justify-end gap-1 text-[11px]">
+                <span className="text-slate-500">📞</span>
+                <span>{(fmpInfo as any)?.phone ?? "-"}</span>
+              </div>
+              <div className="pt-2">
+                <table className="min-w-[160px] text-[11px] text-slate-700 ml-auto">
+                  <tbody>
+                    <tr>
+                      <td className="pr-2 font-semibold text-slate-600">CUSIP</td>
+                      <td>{(fmpInfo as any)?.cusip ?? (selectedRecord as any)?.cusip ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td className="pr-2 font-semibold text-slate-600">ISIN</td>
+                      <td>{(fmpInfo as any)?.isin ?? (selectedRecord as any)?.isin ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td className="pr-2 font-semibold text-slate-600">CIK</td>
+                      <td>{(fmpInfo as any)?.cik ?? (selectedRecord as any)?.cik ?? "-"}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="pt-2 text-[11px] text-slate-700 space-y-1">
+                <div>
+                  <span className="font-semibold text-slate-600">Beta:</span>{" "}
+                  {(fmpInfo as any)?.beta ?? "-"}
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-600">Average volume:</span>{" "}
+                  {formatNumber(
+                    typeof (fmpInfo as any)?.volAvg === "number"
+                      ? (fmpInfo as any)?.volAvg
+                      : Number((fmpInfo as any)?.volAvg)
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-start justify-center">
+              {radarData ? (
+                <ReactApexChart
+                  type="radar"
+                  height={260}
+                  series={[
+                    {
+                      name: "Score",
+                      data: radarData.values,
+                    },
+                  ]}
+                  options={{
+                    chart: { toolbar: { show: false } },
+                    dataLabels: { enabled: false },
+                    stroke: { width: 2 },
+                    markers: { size: 3 },
+                    xaxis: { categories: radarData.categories },
+                    yaxis: { show: true, min: 0, max: 100 },
+                    fill: { opacity: 0.25 },
+                    colors: ["#0ea5e9"],
+                  }}
+                />
+              ) : (
+                <div className="rounded-md border border-dashed border-slate-200 bg-white/60 p-2 text-[11px] text-slate-600">
+                  Nessun punteggio disponibile per il radar.
+                </div>
+              )}
+            </div>
           </div>
-          <div className="mt-1 text-3xl font-bold text-slate-900">{selectedSymbol}</div>
-          <div className="mt-2 text-xl font-semibold text-slate-800">{name}</div>
+
+          {fmpStatus === "no-key" && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              Imposta la variabile VITE_FMP_API_KEY per mostrare i dettagli dal provider.
+            </div>
+          )}
+          {fmpStatus === "error" && (
+            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              Impossibile recuperare i dettagli dal provider.
+            </div>
+          )}
         </div>
+
+
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">

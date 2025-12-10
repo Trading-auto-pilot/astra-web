@@ -21,6 +21,7 @@ export type FundamentalRecord = {
 };
 
 const FUNDAMENTALS_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/fundamentals`;
+const FMP_VARIANTS_ENDPOINT = "https://financialmodelingprep.com/stable/search-exchange-variants";
 
 const parseJsonSafely = async (response: Response) => {
   const text = await response.text();
@@ -60,4 +61,24 @@ export async function fetchFundamentals(): Promise<FundamentalRecord[]> {
   }
 
   return extractRecords(data);
+}
+
+export async function fetchFmpVariant(symbol: string, signal?: AbortSignal): Promise<any | null> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_VARIANTS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP search failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data) || !data.length) return null;
+  // Prefer exact symbol if present; otherwise first result.
+  const exact = data.find(
+    (item: any) => typeof item?.symbol === "string" && item.symbol.toUpperCase() === symbol.toUpperCase()
+  );
+  return exact ?? data[0] ?? null;
 }
