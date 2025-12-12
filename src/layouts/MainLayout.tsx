@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Logo from "../components/atoms/media/Logo";
 import UserMenu from "../components/molecules/navigation/UserMenu";
 import { useRelease } from "../hooks/useReleaseInfo";
@@ -50,18 +50,34 @@ export function MainLayout({
   const release = useRelease();
   const navLinks = buildNavLinks(navEntries);
   const currentHash = typeof window !== "undefined" ? window.location.hash || "#/dashboard" : "#/dashboard";
+  const [openNav, setOpenNav] = useState(false);
+
+  const closeNav = () => setOpenNav(false);
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <aside className="hidden w-60 flex-col border-r border-slate-200 bg-white p-4 md:flex">
-        <Logo />
+      {/* Sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-60 transform border-r border-slate-200 bg-white p-4 transition-transform duration-200 md:static md:translate-x-0 ${
+          openNav ? "translate-x-0 shadow-lg" : "-translate-x-full md:translate-x-0"
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <Logo />
+          <button
+            className="rounded-md p-2 text-slate-600 hover:bg-slate-100 md:hidden"
+            onClick={closeNav}
+            aria-label="Close menu"
+          >
+            ✕
+          </button>
+        </div>
         <div className="mt-3 flex items-center justify-end text-xs text-slate-400">
           <span>versione {(release as any)?.version ?? "-"}</span>
         </div>
         <nav className="mt-6 space-y-2 text-sm text-slate-700">
           {navLinks.map((link) => {
-            const isActive =
-              currentHash === link.href || currentHash.startsWith(`${link.href}/`);
+            const isActive = currentHash === link.href || currentHash.startsWith(`${link.href}/`);
             return (
               <a
                 key={link.href}
@@ -69,6 +85,7 @@ export function MainLayout({
                   isActive ? "bg-slate-100 font-semibold text-slate-900" : ""
                 }`}
                 href={link.href}
+                onClick={closeNav}
               >
                 {link.label}
               </a>
@@ -77,10 +94,22 @@ export function MainLayout({
         </nav>
       </aside>
 
+      {/* Overlay for mobile */}
+      {openNav && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={closeNav} />}
+
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-          <div className="text-lg font-semibold text-slate-900">
-            Astra Trading AI <span className="text-slate-500">(Autopilot)</span>
+          <div className="flex items-center gap-3">
+            <button
+              className="rounded-md p-2 text-slate-700 hover:bg-slate-100 md:hidden"
+              onClick={() => setOpenNav((prev) => !prev)}
+              aria-label="Apri/chiudi menu"
+            >
+              ☰
+            </button>
+            <div className="text-lg font-semibold text-slate-900">
+              Astra Trading AI <span className="text-slate-500">(Autopilot)</span>
+            </div>
           </div>
           <UserMenu userName={userName} />
         </header>
