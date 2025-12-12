@@ -1,10 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchFundamentals, fetchFmpVariant, type FundamentalRecord } from "../../api/fundamentals";
+import {
+  fetchFundamentals,
+  fetchFmpVariant,
+  fetchFmpIncomeStatement,
+  fetchFmpBalanceSheet,
+  fetchFmpCashFlow,
+  fetchFmpKeyMetrics,
+  fetchFmpKeyMetricsTtm,
+  fetchFmpRatios,
+  fetchFmpRatiosTtm,
+  type FundamentalRecord,
+} from "../../api/fundamentals";
 import SectionHeader from "../molecules/content/SectionHeader";
 import ReactApexChart from "react-apexcharts";
 import ReactCountryFlag from "react-country-flag";
+import TickerDetailTab from "./tickers/TickerDetailTab";
+import TickerStatementTab from "./tickers/TickerStatementTab";
+import TickerRatiosTab from "./tickers/TickerRatiosTab";
+import { env } from "../../config/env";
 
 type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total";
+type StatementStatus = "idle" | "loading" | "error" | "no-key";
 
 const getHashSymbol = () => {
   if (typeof window === "undefined") return null;
@@ -33,6 +49,27 @@ const getScoreColor = (value: number) => {
   return { bar: "bg-green-500", text: "text-green-600" };
 };
 
+const formatNumber = (value: number | null) => {
+  if (value === null || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+};
+
+const formatCurrency = (value: number | null, currency?: string) => {
+  if (value === null || Number.isNaN(value)) return "-";
+  if (currency) {
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 0,
+      }).format(value);
+    } catch {
+      // fallback
+    }
+  }
+  return `${formatNumber(value)} ${currency ?? ""}`.trim();
+};
+
 export function TickersPage() {
   const [records, setRecords] = useState<FundamentalRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -42,7 +79,20 @@ export function TickersPage() {
   const [selectedRecord, setSelectedRecord] = useState<FundamentalRecord | null>(null);
   const [fmpInfo, setFmpInfo] = useState<any | null>(null);
   const [fmpStatus, setFmpStatus] = useState<"idle" | "loading" | "error" | "no-key">("idle");
-  const [infoTab, setInfoTab] = useState<"detail" | "statement">("detail");
+  const [infoTab, setInfoTab] = useState<"detail" | "statement" | "ratios">("detail");
+  const [statementTab, setStatementTab] = useState<"income" | "balance" | "cash">("income");
+  const [statementData, setStatementData] = useState<Record<string, { docs: any[]; status: StatementStatus }>>({
+    income: { docs: [], status: "idle" },
+    balance: { docs: [], status: "idle" },
+    cash: { docs: [], status: "idle" },
+  });
+  const [ratiosTab, setRatiosTab] = useState<"keyMetrics" | "ratios" | "keyMetricsTtm" | "ratiosTtm">("keyMetrics");
+  const [ratiosData, setRatiosData] = useState<Record<string, { docs: any[]; status: StatementStatus }>>({
+    keyMetrics: { docs: [], status: "idle" },
+    ratios: { docs: [], status: "idle" },
+    keyMetricsTtm: { docs: [], status: "idle" },
+    ratiosTtm: { docs: [], status: "idle" },
+  });
 
   useEffect(() => {
     let active = true;
@@ -84,6 +134,17 @@ export function TickersPage() {
       setSelectedRecord(null);
       setFmpInfo(null);
       setFmpStatus("idle");
+      setStatementData({
+        income: { docs: [], status: "idle" },
+        balance: { docs: [], status: "idle" },
+        cash: { docs: [], status: "idle" },
+      });
+      setRatiosData({
+        keyMetrics: { docs: [], status: "idle" },
+        ratios: { docs: [], status: "idle" },
+        keyMetricsTtm: { docs: [], status: "idle" },
+        ratiosTtm: { docs: [], status: "idle" },
+      });
       return;
     }
     const found = records.find((item) => {
@@ -123,7 +184,103 @@ export function TickersPage() {
       active = false;
       controller.abort();
     };
-  }, [selectedSymbol]);
+  }, [selectedSymbol, env.fmpApiKey]);
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    const configs = [
+      { key: "income", fetcher: fetchFmpIncomeStatement },
+      { key: "balance", fetcher: fetchFmpBalanceSheet },
+      { key: "cash", fetcher: fetchFmpCashFlow },
+    ];
+
+    configs.forEach((cfg) => {
+      if (!env.fmpApiKey) {
+        setStatementData((prev) => ({
+          ...prev,
+          [cfg.key]: { docs: [], status: "no-key" },
+        }));
+        return;
+      }
+      let active = true;
+      const controller = new AbortController();
+      setStatementData((prev) => ({
+        ...prev,
+        [cfg.key]: { ...(prev[cfg.key] || {}), status: "loading" },
+      }));
+      cfg
+        .fetcher(selectedSymbol, controller.signal)
+        .then((data) => {
+          if (!active) return;
+          setStatementData((prev) => ({
+            ...prev,
+            [cfg.key]: { docs: Array.isArray(data) ? data : [], status: "idle" },
+          }));
+        })
+        .catch((err) => {
+          if (!active || err.name === "AbortError") return;
+          console.error("FMP statement error", cfg.key, err);
+          setStatementData((prev) => ({
+            ...prev,
+            [cfg.key]: { docs: [], status: err.message === "Missing FMP API key" ? "no-key" : "error" },
+          }));
+        });
+
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    });
+  }, [selectedSymbol, env.fmpApiKey]);
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    const configs = [
+      { key: "keyMetrics", fetcher: fetchFmpKeyMetrics },
+      { key: "ratios", fetcher: fetchFmpRatios },
+      { key: "keyMetricsTtm", fetcher: fetchFmpKeyMetricsTtm },
+      { key: "ratiosTtm", fetcher: fetchFmpRatiosTtm },
+    ];
+
+    configs.forEach((cfg) => {
+      if (!env.fmpApiKey) {
+        setRatiosData((prev) => ({
+          ...prev,
+          [cfg.key]: { docs: [], status: "no-key" },
+        }));
+        return;
+      }
+      let active = true;
+      const controller = new AbortController();
+      setRatiosData((prev) => ({
+        ...prev,
+        [cfg.key]: { ...(prev[cfg.key] || {}), status: "loading" },
+      }));
+
+      cfg
+        .fetcher(selectedSymbol, controller.signal)
+        .then((data) => {
+          if (!active) return;
+          setRatiosData((prev) => ({
+            ...prev,
+            [cfg.key]: { docs: Array.isArray(data) ? data : [], status: "idle" },
+          }));
+        })
+        .catch((err) => {
+          if (!active || err.name === "AbortError") return;
+          console.error("FMP ratios error", cfg.key, err);
+          setRatiosData((prev) => ({
+            ...prev,
+            [cfg.key]: { docs: [], status: err.message === "Missing FMP API key" ? "no-key" : "error" },
+          }));
+        });
+
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    });
+  }, [selectedSymbol, env.fmpApiKey]);
 
   const topRows = useMemo(() => {
     const scoreKeyMap: Record<SortKey, string[]> = {
@@ -246,6 +403,133 @@ export function TickersPage() {
     return { preview: `${previewWords}...`, full: raw, remainder };
   }, [fmpInfo]);
 
+  const buildStatementMetrics = (statements: any[], currencyFallback?: string) => {
+    if (!statements.length) return [];
+    const currency = (statements[0] as any)?.currency || currencyFallback;
+
+    const sorted = [...statements].sort((a: any, b: any) => {
+      const da = new Date(a?.date || `${a?.calendarYear || ""}`).getTime();
+      const db = new Date(b?.date || `${b?.calendarYear || ""}`).getTime();
+      return db - da;
+    });
+
+    const metaKeys = new Set([
+      "date",
+      "calendarYear",
+      "period",
+      "symbol",
+      "filingDate",
+      "acceptedDate",
+      "reportedCurrency",
+      "currency",
+      "cik",
+      "fiscalYear",
+      "fillingDate",
+      "link",
+      "finalLink",
+    ]);
+
+    const first = sorted[0] || {};
+    const usedDefs = Object.keys(first)
+      .filter((key) => !metaKeys.has(key))
+      .filter((key) => {
+        const val = first[key];
+        if (typeof val === "number") return true;
+        if (val === null || val === undefined) return false;
+        const num = Number(val);
+        return Number.isFinite(num);
+      })
+      .map((key) => ({
+        key,
+        label: key
+          .replace(/_/g, " ")
+          .replace(/([a-z])([A-Z])/g, "$1 $2")
+          .replace(/\s+/g, " ")
+          .replace(/^\w/, (c) => c.toUpperCase()),
+      }));
+
+    return usedDefs.map((def) => {
+      const rowsView = sorted.slice(0, 6).map((item: any, idx) => {
+        const label = item?.calendarYear || item?.date || item?.period || "-";
+        const valueRaw = item ? item[def.key] : null;
+        const valueNum =
+          typeof valueRaw === "number" ? valueRaw : valueRaw !== undefined ? Number(valueRaw) : null;
+        const value = Number.isFinite(valueNum) ? valueNum : null;
+
+        const prev = sorted[idx + 1];
+        const prevRaw = prev ? prev[def.key] : null;
+        const prevNum =
+          prev && typeof prevRaw === "number" ? prevRaw : prevRaw !== undefined ? Number(prevRaw) : null;
+        const prevValue = prev && Number.isFinite(prevNum) ? prevNum : null;
+
+        const diff = prevValue !== null && value !== null ? value - prevValue : null;
+        const pct =
+          prevValue !== null && value !== null && prevValue !== 0 ? ((value - prevValue) / prevValue) * 100 : null;
+
+        let deltaLabel = "-";
+        let pctLabel = "-";
+        const positive = diff !== null ? diff >= 0 : false;
+        if (diff !== null) {
+          const sign = diff >= 0 ? "+" : "";
+          deltaLabel = `${sign}${formatCurrency(Math.abs(diff), currency)}`;
+        }
+        if (pct !== null) {
+          const sign = pct >= 0 ? "+" : "";
+          pctLabel = `${sign}${pct.toFixed(1)}% ${pct >= 0 ? "↑" : "↓"}`;
+        }
+
+        return {
+          label: String(label),
+          value: formatCurrency(value, currency),
+          delta: deltaLabel,
+          pct: pctLabel,
+          positive,
+          rawValue: value,
+        };
+      });
+
+      return {
+        key: def.key,
+        label: def.label,
+        heading: def.label,
+        rowsView,
+      };
+    });
+  };
+
+  const incomeMetrics = useMemo(() => {
+    const incomeDocs = statementData.income?.docs || [];
+    const currency = (incomeDocs[0] as any)?.currency || (fmpInfo as any)?.currency || (selectedRecord as any)?.currency;
+    return buildStatementMetrics(incomeDocs, currency);
+  }, [statementData, fmpInfo, selectedRecord]);
+
+  const balanceMetrics = useMemo(() => {
+    const balanceDocs = statementData.balance?.docs || [];
+    const currency = (balanceDocs[0] as any)?.currency || (fmpInfo as any)?.currency || (selectedRecord as any)?.currency;
+    return buildStatementMetrics(balanceDocs, currency);
+  }, [statementData, fmpInfo, selectedRecord]);
+
+  const cashMetrics = useMemo(() => {
+    const cashDocs = statementData.cash?.docs || [];
+    const currency = (cashDocs[0] as any)?.currency || (fmpInfo as any)?.currency || (selectedRecord as any)?.currency;
+    return buildStatementMetrics(cashDocs, currency);
+  }, [statementData, fmpInfo, selectedRecord]);
+
+  const ratioMetrics = useMemo(() => {
+    const build = (key: string) => {
+      const docs = ratiosData[key]?.docs || [];
+      const currency = (docs[0] as any)?.currency || (fmpInfo as any)?.currency || (selectedRecord as any)?.currency;
+      return buildStatementMetrics(docs, currency);
+    };
+
+    return {
+      keyMetrics: build("keyMetrics"),
+      ratios: build("ratios"),
+      keyMetricsTtm: build("keyMetricsTtm"),
+      ratiosTtm: build("ratiosTtm"),
+    };
+  }, [ratiosData, fmpInfo, selectedRecord]);
+
   const priceInfo = useMemo(() => {
     const rawPrice = (fmpInfo as any)?.price;
     const price = typeof rawPrice === "number" ? rawPrice : Number(rawPrice);
@@ -265,27 +549,6 @@ export function TickersPage() {
     }
     return { price: Number.isFinite(price) ? price : null, min: Number.isFinite(min) ? min : null, max: Number.isFinite(max) ? max : null };
   }, [fmpInfo]);
-
-  const formatNumber = (value: number | null) => {
-    if (value === null || Number.isNaN(value)) return "-";
-    return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
-  };
-
-  const formatCurrency = (value: number | null, currency: string | undefined) => {
-    if (value === null || Number.isNaN(value)) return "-";
-    if (currency) {
-      try {
-        return new Intl.NumberFormat("en-US", {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 0,
-        }).format(value);
-      } catch {
-        // fallback
-      }
-    }
-    return `${formatNumber(value)} ${currency ?? ""}`.trim();
-  };
 
   if (selectedSymbol) {
     const name =
@@ -540,17 +803,18 @@ export function TickersPage() {
           )}
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <SectionHeader title="Dettaglio" subTitle="Tutti i campi disponibili per il ticker" />
-            <div className="flex gap-2">
-              {[
-                { id: "detail" as const, label: "Dettaglio" },
-                { id: "statement" as const, label: "Statement" },
-              ].map((tab) => {
-                const active = infoTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
+            <div className="flex items-center justify-between">
+              <SectionHeader title="Dettaglio" subTitle="Tutti i campi disponibili per il ticker" />
+              <div className="flex gap-2">
+                {[
+                  { id: "detail" as const, label: "Dettaglio" },
+                  { id: "statement" as const, label: "Statement" },
+                  { id: "ratios" as const, label: "Ratios" },
+                ].map((tab) => {
+                  const active = infoTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
                     onClick={() => setInfoTab(tab.id)}
                     className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                       active
@@ -567,38 +831,70 @@ export function TickersPage() {
 
           <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-4">
             {infoTab === "detail" ? (
-              detailRows.length ? (
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                  {(() => {
-                    const cols = [[], [], []] as { key: string; value: string }[][];
-                    detailRows.forEach((row, idx) => {
-                      cols[idx % 3].push(row);
-                    });
-                    return cols.map((col, colIdx) => (
-                      <div key={`col-${colIdx}`} className="rounded-lg border border-slate-200 bg-white/80">
-                        <table className="w-full text-sm">
-                          <tbody className="divide-y divide-slate-100">
-                            {col.map((row) => (
-                              <tr key={row.key}>
-                                <td className="w-32 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                                  {row.key}
-                                </td>
-                                <td className="px-3 py-2 text-[12px] text-slate-800 break-words">
-                                  {row.value}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ));
-                  })()}
+              <TickerDetailTab detailRows={detailRows} />
+            ) : infoTab === "statement" ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  {[
+                    { id: "income" as const, label: "Income Statement" },
+                    { id: "balance" as const, label: "Balance Sheet Statement" },
+                    { id: "cash" as const, label: "Cash Flow Statement" },
+                  ].map((tab) => {
+                    const active = statementTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setStatementTab(tab.id)}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          active
+                            ? "border-slate-800 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : (
-                <div className="px-2 py-3 text-sm text-slate-500">Nessun dettaglio disponibile.</div>
-              )
+
+                {statementTab === "income" && (
+                  <TickerStatementTab metrics={incomeMetrics} status={statementData.income?.status ?? "idle"} />
+                )}
+                {statementTab === "balance" && (
+                  <TickerStatementTab metrics={balanceMetrics} status={statementData.balance?.status ?? "idle"} />
+                )}
+                {statementTab === "cash" && (
+                  <TickerStatementTab metrics={cashMetrics} status={statementData.cash?.status ?? "idle"} />
+                )}
+              </div>
             ) : (
-              <div className="text-sm text-slate-700">Statement contenuti non disponibili al momento.</div>
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  {[
+                    { id: "keyMetrics" as const, label: "Key Metrics" },
+                    { id: "ratios" as const, label: "Ratios" },
+                    { id: "keyMetricsTtm" as const, label: "Key Metrics TTM" },
+                    { id: "ratiosTtm" as const, label: "Ratios TTM" },
+                  ].map((tab) => {
+                    const active = ratiosTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setRatiosTab(tab.id)}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          active
+                            ? "border-slate-800 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <TickerRatiosTab metrics={ratioMetrics[ratiosTab]} status={ratiosData[ratiosTab]?.status ?? "idle"} />
+              </div>
             )}
           </div>
         </div>

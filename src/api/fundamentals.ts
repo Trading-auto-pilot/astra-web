@@ -22,6 +22,13 @@ export type FundamentalRecord = {
 
 const FUNDAMENTALS_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/fundamentals`;
 const FMP_VARIANTS_ENDPOINT = "https://financialmodelingprep.com/stable/search-exchange-variants";
+const FMP_INCOME_ENDPOINT = "https://financialmodelingprep.com/stable/income-statement";
+const FMP_BALANCE_ENDPOINT = "https://financialmodelingprep.com/stable/balance-sheet-statement";
+const FMP_CASH_ENDPOINT = "https://financialmodelingprep.com/stable/cash-flow-statement";
+const FMP_KEY_METRICS_ENDPOINT = "https://financialmodelingprep.com/stable/key-metrics";
+const FMP_KEY_METRICS_TTM_ENDPOINT = "https://financialmodelingprep.com/stable/key-metrics-ttm";
+const FMP_RATIOS_ENDPOINT = "https://financialmodelingprep.com/stable/ratios";
+const FMP_RATIOS_TTM_ENDPOINT = "https://financialmodelingprep.com/stable/ratios-ttm";
 
 const parseJsonSafely = async (response: Response) => {
   const text = await response.text();
@@ -81,4 +88,109 @@ export async function fetchFmpVariant(symbol: string, signal?: AbortSignal): Pro
     (item: any) => typeof item?.symbol === "string" && item.symbol.toUpperCase() === symbol.toUpperCase()
   );
   return exact ?? data[0] ?? null;
+}
+
+export async function fetchFmpIncomeStatement(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_INCOME_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP income statement fetch failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data;
+}
+
+export async function fetchFmpBalanceSheet(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_BALANCE_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP balance sheet fetch failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data;
+}
+
+export async function fetchFmpCashFlow(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_CASH_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP cash flow fetch failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data;
+}
+
+export async function fetchFmpKeyMetrics(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_KEY_METRICS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP key metrics fetch failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data;
+}
+
+export async function fetchFmpKeyMetricsTtm(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_KEY_METRICS_TTM_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP key metrics TTM fetch failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data;
+}
+
+export async function fetchFmpRatios(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_RATIOS_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP ratios fetch failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data;
+}
+
+export async function fetchFmpRatiosTtm(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_RATIOS_TTM_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("FMP ratios TTM fetch failed");
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data;
 }
