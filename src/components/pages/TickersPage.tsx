@@ -26,6 +26,7 @@ import TickerRatiosTab from "./tickers/TickerRatiosTab";
 import TickerAnalysisTab from "./tickers/TickerAnalysisTab";
 import TickerFinancialReportTab from "./tickers/TickerFinancialReportTab";
 import TickerSegmentationTab from "./tickers/TickerSegmentationTab";
+import TickerNewsTab from "./tickers/TickerNewsTab";
 import { env } from "../../config/env";
 
 type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total";
@@ -91,7 +92,9 @@ export function TickersPage() {
   const [selectedRecord, setSelectedRecord] = useState<FundamentalRecord | null>(null);
   const [fmpInfo, setFmpInfo] = useState<any | null>(null);
   const [fmpStatus, setFmpStatus] = useState<"idle" | "loading" | "error" | "no-key">("idle");
-  const [infoTab, setInfoTab] = useState<"detail" | "statement" | "ratios" | "score" | "financialReport" | "segmentation">("detail");
+  const [infoTab, setInfoTab] = useState<
+    "detail" | "statement" | "ratios" | "score" | "financialReport" | "segmentation" | "news"
+  >("detail");
   const [statementTab, setStatementTab] = useState<"income" | "balance" | "cash">("income");
   const [statementData, setStatementData] = useState<Record<string, { docs: any[]; status: StatementStatus }>>({
     income: { docs: [], status: "idle" },
@@ -1153,12 +1156,14 @@ export function TickersPage() {
                     : infoTab === "statement"
                     ? "Statement"
                     : infoTab === "ratios"
-                    ? "Ratios"
-                    : infoTab === "score"
-                    ? "Analysis"
-                    : infoTab === "segmentation"
-                    ? "Segmentation"
-                    : "Financial Report"
+                  ? "Ratios"
+                  : infoTab === "score"
+                  ? "Analysis"
+                  : infoTab === "segmentation"
+                  ? "Segmentation"
+                  : infoTab === "news"
+                  ? "News"
+                  : "Financial Report"
                 }
                 subTitle="Tutti i campi disponibili per il ticker"
               />
@@ -1170,6 +1175,7 @@ export function TickersPage() {
                   { id: "score" as const, label: "Analysis" },
                   { id: "financialReport" as const, label: "Financial Report" },
                   { id: "segmentation" as const, label: "Segmentation" },
+                  { id: "news" as const, label: "News" },
                 ].map((tab) => {
                   const active = infoTab === tab.id;
                   return (
@@ -1289,6 +1295,8 @@ export function TickersPage() {
                 geographicStatus={segmentationData.geographic?.status ?? "idle"}
               />
             )}
+
+            {infoTab === "news" && <TickerNewsTab symbol={selectedSymbol} />}
           </div>
         </div>
       </div>
