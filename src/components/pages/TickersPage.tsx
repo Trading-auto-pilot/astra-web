@@ -83,6 +83,9 @@ export function TickersPage() {
   const [records, setRecords] = useState<FundamentalRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedIndustry, setSelectedIndustry] = useState<string>("");
+  const [selectedCountry, setSelectedCountry] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("total");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(() => getHashSymbol());
   const [selectedRecord, setSelectedRecord] = useState<FundamentalRecord | null>(null);
@@ -481,6 +484,28 @@ export function TickersPage() {
     });
   }, [selectedSymbol, env.fmpApiKey]);
 
+  const industryOptions = useMemo(() => {
+    const set = new Set<string>();
+    records.forEach((item) => {
+      const value = (item as any).industry;
+      if (value && typeof value === "string") {
+        set.add(value);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [records]);
+
+  const countryOptions = useMemo(() => {
+    const set = new Set<string>();
+    records.forEach((item) => {
+      const value = (item as any).country;
+      if (value && typeof value === "string") {
+        set.add(value);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [records]);
+
   const topRows = useMemo(() => {
     const scoreKeyMap: Record<SortKey, string[]> = {
       momentum: ["momentum_score"],
@@ -491,6 +516,22 @@ export function TickersPage() {
     };
 
     const keys = scoreKeyMap[sortKey];
+    const term = searchTerm.trim().toLowerCase();
+
+    const filteredRecords = term
+      ? records.filter((item) => {
+          const symbol = ((item as any).ticker ?? (item as any).symbol ?? "").toString().toLowerCase();
+          return symbol.includes(term);
+        })
+      : records;
+
+    const industryFiltered = selectedIndustry
+      ? filteredRecords.filter((item) => ((item as any).industry ?? "").toString() === selectedIndustry)
+      : filteredRecords;
+
+    const countryFiltered = selectedCountry
+      ? industryFiltered.filter((item) => ((item as any).country ?? "").toString() === selectedCountry)
+      : industryFiltered;
 
     const getScore = (item: FundamentalRecord, keyList: string[]) => {
       for (const key of keyList) {
@@ -501,7 +542,7 @@ export function TickersPage() {
       return null;
     };
 
-    const sorted = [...records].sort((a, b) => {
+    const sorted = [...countryFiltered].sort((a, b) => {
       const aScore = getScore(a, keys);
       const bScore = getScore(b, keys);
       if (aScore === null && bScore === null) return 0;
@@ -511,7 +552,7 @@ export function TickersPage() {
     });
 
     return sorted.slice(0, 50);
-  }, [records, sortKey]);
+  }, [records, sortKey, searchTerm, selectedIndustry, selectedCountry]);
 
   const detailRows = useMemo(() => {
     if (!selectedRecord) return [];
@@ -1263,32 +1304,92 @@ export function TickersPage() {
           <div className="text-sm text-slate-600">
             Osserva i principali ticker con le metriche fondamentali aggiornate.
           </div>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { key: "momentum", label: "Best Momentum" },
-              { key: "quality", label: "Best Quality" },
-              { key: "risk", label: "Best Risk" },
-              { key: "valuation", label: "Best Value" },
-              { key: "total", label: "Best General" },
-            ].map((option) => {
-              const active = sortKey === option.key;
-              return (
-                <button
-                  key={option.key}
-                  onClick={() => setSortKey(option.key as SortKey)}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                    active
-                      ? "border-slate-800 bg-slate-900 text-white"
-                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="sr-only" htmlFor="ticker-search">
+                Cerca ticker
+              </label>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-inner">
+                <input
+                  id="ticker-search"
+                  type="search"
+                  inputMode="search"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Cerca ticker (es. AAPL)"
+                  className="min-w-[14rem] bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="text-xs font-semibold text-slate-500 transition hover:text-slate-700"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: "momentum", label: "Best Momentum" },
+                  { key: "quality", label: "Best Quality" },
+                  { key: "risk", label: "Best Risk" },
+                  { key: "valuation", label: "Best Value" },
+                  { key: "total", label: "Best General" },
+                ].map((option) => {
+                  const active = sortKey === option.key;
+                  return (
+                    <button
+                      key={option.key}
+                      onClick={() => setSortKey(option.key as SortKey)}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        active
+                          ? "border-slate-800 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <label className="sr-only" htmlFor="industry-filter">
+                Filtra per industria
+              </label>
+              <select
+                id="industry-filter"
+                value={selectedIndustry}
+                onChange={(e) => setSelectedIndustry(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-inner focus:border-slate-300 focus:outline-none"
+              >
+                <option value="">Tutte le industrie</option>
+                {industryOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <label className="sr-only" htmlFor="country-filter">
+                Filtra per paese
+              </label>
+              <select
+                id="country-filter"
+                value={selectedCountry}
+                onChange={(e) => setSelectedCountry(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-inner focus:border-slate-300 focus:outline-none"
+              >
+                <option value="">Tutti i paesi</option>
+                {countryOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
-
         {loading ? (
           <div className="flex items-center justify-center px-6 py-10 text-sm text-slate-500">
             Caricamento in corso...
