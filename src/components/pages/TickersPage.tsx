@@ -20,7 +20,7 @@ import {
 import SectionHeader from "../molecules/content/SectionHeader";
 import ReactApexChart from "react-apexcharts";
 import ReactCountryFlag from "react-country-flag";
-import TickerDetailTab from "./tickers/TickerDetailTab";
+import TickerDetailTab, { type MomentumComponents } from "./tickers/TickerDetailTab";
 import TickerStatementTab from "./tickers/TickerStatementTab";
 import TickerRatiosTab from "./tickers/TickerRatiosTab";
 import TickerAnalysisTab from "./tickers/TickerAnalysisTab";
@@ -30,7 +30,7 @@ import TickerNewsTab from "./tickers/TickerNewsTab";
 import TickerChartTab from "./tickers/TickerChartTab";
 import { env } from "../../config/env";
 
-type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total";
+type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total" | "doubleTop";
 type StatementStatus = "idle" | "loading" | "error" | "no-key";
 
 const getHashSymbol = () => {
@@ -79,6 +79,48 @@ const formatCurrency = (value: number | null, currency?: string) => {
     }
   }
   return `${formatNumber(value)} ${currency ?? ""}`.trim();
+};
+
+const formatDetailValue = (value: unknown) => {
+  if (value === null || value === undefined) return "-";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.length ? JSON.stringify(value) : "[]";
+  if (typeof value === "object") return JSON.stringify(value);
+  return "-";
+};
+
+type ParsedMomentum = MomentumComponents & { raw: Record<string, unknown> | null };
+
+const parseMomentumJson = (value: unknown): ParsedMomentum | null => {
+  if (value === null || value === undefined) return null;
+  let parsed: any = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const scoreNum = typeof parsed.score === "number" ? parsed.score : Number(parsed.score);
+  const doubleTopScoreNum =
+    typeof parsed.doubleTopScore === "number" ? parsed.doubleTopScore : Number(parsed.doubleTopScore);
+  const components =
+    parsed.components && typeof parsed.components === "object" ? (parsed.components as Record<string, unknown>) : null;
+
+  return {
+    raw: parsed as Record<string, unknown>,
+    score: Number.isFinite(scoreNum) ? scoreNum : null,
+    doubleTopScore: Number.isFinite(doubleTopScoreNum) ? doubleTopScoreNum : null,
+    components,
+  };
+};
+
+const getDoubleTopScore = (record: FundamentalRecord): number | null => {
+  const parsed = parseMomentumJson((record as any).momentum_json);
+  return parsed?.doubleTopScore ?? null;
 };
 
 export function TickersPage() {
@@ -520,6 +562,7 @@ export function TickersPage() {
       risk: ["risk_score"],
       valuation: ["valuation_score", "valuation_scores"],
       total: ["total_score", "score", "totalScore"],
+      doubleTop: [],
     };
 
     const keys = scoreKeyMap[sortKey];
@@ -593,6 +636,15 @@ export function TickersPage() {
     };
 
     const sorted = [...countryFiltered].sort((a, b) => {
+      if (sortKey === "doubleTop") {
+        const aScore = getDoubleTopScore(a);
+        const bScore = getDoubleTopScore(b);
+        if (aScore === null && bScore === null) return 0;
+        if (aScore === null) return 1;
+        if (bScore === null) return -1;
+        return bScore - aScore;
+      }
+
       const aScore = getScore(a, keys);
       const bScore = getScore(b, keys);
       if (aScore === null && bScore === null) return 0;
@@ -604,54 +656,40 @@ export function TickersPage() {
     return sorted.slice(0, 50);
   }, [records, sortKey, searchTerm, selectedIndustry, selectedCountry]);
 
+  const parsedMomentum = useMemo<ParsedMomentum | null>(() => {
+    if (!selectedRecord) return null;
+    return parseMomentumJson((selectedRecord as any).momentum_json);
+  }, [selectedRecord]);
+
   const detailRows = useMemo(() => {
     if (!selectedRecord) return [];
     const rows: { key: string; value: string }[] = [];
 
     Object.entries(selectedRecord).forEach(([key, value]) => {
       if (key === "momentum_json") {
-        let parsed: any = null;
-        if (typeof value === "string") {
-          try {
-            parsed = JSON.parse(value);
-          } catch {
-            parsed = value;
-          }
-        } else {
-          parsed = value;
-        }
-
-        if (parsed && typeof parsed === "object") {
-          Object.entries(parsed as Record<string, unknown>).forEach(([k, v]) => {
-            let display = "-";
-            if (v === null || v === undefined) display = "-";
-            else if (typeof v === "number" || typeof v === "boolean") display = String(v);
-            else if (typeof v === "string") display = v;
-            else if (Array.isArray(v)) display = v.length ? JSON.stringify(v) : "[]";
-            else if (typeof v === "object") display = JSON.stringify(v);
-            rows.push({ key: `momentum_json.${k}`, value: display });
+        if (parsedMomentum?.raw) {
+          Object.entries(parsedMomentum.raw).forEach(([k, v]) => {
+            if (k === "components") return;
+            rows.push({ key: `momentum_json.${k}`, value: formatDetailValue(v) });
           });
           return;
         }
       }
 
-      let display = "-";
-      if (value === null || value === undefined) {
-        display = "-";
-      } else if (typeof value === "number" || typeof value === "boolean") {
-        display = String(value);
-      } else if (typeof value === "string") {
-        display = value;
-      } else if (Array.isArray(value)) {
-        display = value.length ? JSON.stringify(value) : "[]";
-      } else if (typeof value === "object") {
-        display = JSON.stringify(value);
-      }
-      rows.push({ key, value: display });
+      rows.push({ key, value: formatDetailValue(value) });
     });
 
     return rows;
-  }, [selectedRecord]);
+  }, [selectedRecord, parsedMomentum]);
+
+  const momentumComponents = useMemo<MomentumComponents | null>(() => {
+    if (!parsedMomentum) return null;
+    return {
+      score: parsedMomentum.score,
+      doubleTopScore: parsedMomentum.doubleTopScore,
+      components: parsedMomentum.components,
+    };
+  }, [parsedMomentum]);
 
   const scoreSources = useMemo(
     () => [scoreData.doc, selectedRecord].filter(Boolean),
@@ -671,12 +709,15 @@ export function TickersPage() {
       return null;
     };
 
+    const doubleTopValue = parsedMomentum?.doubleTopScore ?? null;
+
     const metrics: { label: string; value: number | null }[] = [
       { label: "Momentum", value: get(["momentum_score", "momentumScore"]) },
       { label: "Quality", value: get(["quality_score", "qualityScore"]) },
       { label: "Risk", value: get(["risk_score", "riskScore"]) },
       { label: "Valuation", value: get(["valuation_score", "valuation_scores", "valuationScore"]) },
       { label: "Total", value: get(["total_score", "score", "totalScore"]) },
+      { label: "Double top", value: doubleTopValue },
     ];
 
     const filtered = metrics.filter((m) => m.value !== null);
@@ -687,7 +728,7 @@ export function TickersPage() {
       values: filtered.map((m) => m.value as number),
       items: filtered,
     };
-  }, [scoreSources]);
+  }, [scoreSources, parsedMomentum]);
 
   const altmanValue = useMemo(() => {
     const raw =
@@ -1248,7 +1289,9 @@ export function TickersPage() {
           <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-4">
             {infoTab === "chart" && <TickerChartTab symbol={selectedSymbol} />}
 
-            {infoTab === "detail" && <TickerDetailTab detailRows={detailRows} />}
+            {infoTab === "detail" && (
+              <TickerDetailTab detailRows={detailRows} momentumComponents={momentumComponents} />
+            )}
 
             {infoTab === "statement" && (
               <div className="space-y-3">
@@ -1390,17 +1433,18 @@ export function TickersPage() {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {[
-                  { key: "momentum", label: "Best Momentum" },
-                  { key: "quality", label: "Best Quality" },
-                  { key: "risk", label: "Best Risk" },
-                  { key: "valuation", label: "Best Value" },
-                  { key: "total", label: "Best General" },
-                ].map((option) => {
-                  const active = sortKey === option.key;
-                  return (
-                    <button
-                      key={option.key}
+                  {[
+                    { key: "momentum", label: "Best Momentum" },
+                    { key: "quality", label: "Best Quality" },
+                    { key: "risk", label: "Best Risk" },
+                    { key: "valuation", label: "Best Value" },
+                    { key: "total", label: "Best General" },
+                    { key: "doubleTop", label: "Best double top score" },
+                  ].map((option) => {
+                    const active = sortKey === option.key;
+                    return (
+                      <button
+                        key={option.key}
                       onClick={() => setSortKey(option.key as SortKey)}
                       className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                         active
@@ -1487,6 +1531,7 @@ export function TickersPage() {
                     { label: "Quality", value: getScore("quality_score") },
                     { label: "Risk", value: getScore("risk_score") },
                     { label: "Momentum", value: getScore("momentum_score") },
+                    { label: "Double top", value: getDoubleTopScore(item) },
                     { label: "Total", value: getScore("total_score", "score", "totalScore") },
                   ];
 
