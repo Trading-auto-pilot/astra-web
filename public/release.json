@@ -1,6 +1,6 @@
 {
     "lastUpdate" : "12/12/2025",
-    "version": "1.8",
+    "version": "1.9",
     "note" : [  "1.0.0 First version test in PAPER environment",
                 "1.1.0 Fix  CliNav, added icons, added detailed tickers page",
                 "1.2.0 Improving detailed ticker page",
@@ -9,6 +9,7 @@
                 "1.5.0 Detailed ticker page: Added Ratios, Analysis, Financial Report and Segmentation",
                 "1.6.0 Side menu apribile o meno con burger icon solo su mobile",
                 "1.7.0 Aggiunta TAB News, Ricerca Tick e selezione Country Industry",
-                "1.8.0 Aggiunta TAB Chart"
+                "1.8.0 Aggiunta TAB Chart",
+                "1.9.0 Paesi aggregati in Europe, Asia and Latam"
             ]
 }

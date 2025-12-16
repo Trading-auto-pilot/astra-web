@@ -500,14 +500,17 @@ export function TickersPage() {
   }, [records]);
 
   const countryOptions = useMemo(() => {
-    const set = new Set<string>();
+    const agg = ["Europe", "Asia", "Latam"];
+    const set = new Set<string>(agg);
     records.forEach((item) => {
       const value = (item as any).country;
       if (value && typeof value === "string") {
         set.add(value);
       }
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    const sorted = Array.from(set).sort((a, b) => a.localeCompare(b));
+    const base = sorted.filter((val) => !agg.includes(val));
+    return [...agg, ...base];
   }, [records]);
 
   const topRows = useMemo(() => {
@@ -529,12 +532,55 @@ export function TickersPage() {
         })
       : records;
 
+    const normalizeCountry = (value: string) => value.trim().toUpperCase();
+    const regionGroups: Record<string, Set<string>> = {
+      Europe: new Set(
+        [
+          "AL", "ANDORRA", "AUSTRIA", "BE", "BELGIUM", "BG", "BULGARIA", "CH", "SWITZERLAND", "CY", "CYPRUS", "CZ",
+          "CZECH REPUBLIC", "DE", "GERMANY", "DK", "DENMARK", "EE", "ESTONIA", "ES", "SPAIN", "FI", "FINLAND", "FR",
+          "FRANCE", "GB", "UK", "UNITED KINGDOM", "GR", "GREECE", "HR", "CROATIA", "HU", "HUNGARY", "IE", "IRELAND",
+          "IS", "ICELAND", "IT", "ITALY", "LI", "LIECHTENSTEIN", "LT", "LITHUANIA", "LU", "LUXEMBOURG", "LV",
+          "LATVIA", "MC", "MONACO", "MT", "MALTA", "NL", "NETHERLANDS", "NO", "NORWAY", "PL", "POLAND", "PT",
+          "PORTUGAL", "RO", "ROMANIA", "SE", "SWEDEN", "SI", "SLOVENIA", "SK", "SLOVAKIA", "SM", "SAN MARINO",
+          "VA", "VATICAN"
+        ].map(normalizeCountry)
+      ),
+      Asia: new Set(
+        [
+          "AE", "UAE", "UNITED ARAB EMIRATES", "AF", "AFGHANISTAN", "AM", "ARMENIA", "AZ", "AZERBAIJAN", "BD",
+          "BANGLADESH", "BH", "BAHRAIN", "BN", "BRUNEI", "BT", "BHUTAN", "CN", "CHINA", "CY", "CYPRUS", "GE",
+          "GEORGIA", "HK", "HONG KONG", "ID", "INDONESIA", "IN", "INDIA", "IL", "ISRAEL", "IQ", "IRAQ", "IR",
+          "IRAN", "JO", "JORDAN", "JP", "JAPAN", "KG", "KYRGYZSTAN", "KH", "CAMBODIA", "KP", "NORTH KOREA", "KR",
+          "SOUTH KOREA", "KW", "KUWAIT", "KZ", "KAZAKHSTAN", "LA", "LAOS", "LB", "LEBANON", "LK", "SRI LANKA",
+          "MM", "MYANMAR", "MN", "MONGOLIA", "MO", "MACAU", "MV", "MALDIVES", "MY", "MALAYSIA", "NP", "NEPAL",
+          "OM", "OMAN", "PH", "PHILIPPINES", "PK", "PAKISTAN", "PS", "PALESTINE", "QA", "QATAR", "SA", "SAUDI ARABIA",
+          "SG", "SINGAPORE", "SY", "SYRIA", "TH", "THAILAND", "TJ", "TAJIKISTAN", "TL", "TIMOR-LESTE", "TM",
+          "TURKMENISTAN", "TR", "TURKEY", "TW", "TAIWAN", "UZ", "UZBEKISTAN", "VN", "VIETNAM", "YE", "YEMEN"
+        ].map(normalizeCountry)
+      ),
+      Latam: new Set(
+        [
+          "AR", "ARGENTINA", "BO", "BOLIVIA", "BR", "BRAZIL", "BZ", "BELIZE", "CL", "CHILE", "CO", "COLOMBIA",
+          "CR", "COSTA RICA", "CU", "CUBA", "DO", "DOMINICAN REPUBLIC", "EC", "ECUADOR", "SV", "EL SALVADOR", "GF",
+          "FRENCH GUIANA", "GT", "GUATEMALA", "GY", "GUYANA", "HN", "HONDURAS", "JM", "JAMAICA", "MX", "MEXICO",
+          "NI", "NICARAGUA", "PA", "PANAMA", "PE", "PERU", "PR", "PUERTO RICO", "PY", "PARAGUAY", "SR", "SURINAME",
+          "UY", "URUGUAY", "VE", "VENEZUELA"
+        ].map(normalizeCountry)
+      ),
+    };
+
     const industryFiltered = selectedIndustry
       ? filteredRecords.filter((item) => ((item as any).industry ?? "").toString() === selectedIndustry)
       : filteredRecords;
 
     const countryFiltered = selectedCountry
-      ? industryFiltered.filter((item) => ((item as any).country ?? "").toString() === selectedCountry)
+      ? industryFiltered.filter((item) => {
+          const countryRaw = ((item as any).country ?? "").toString();
+          const norm = normalizeCountry(countryRaw);
+          const group = regionGroups[selectedCountry as keyof typeof regionGroups];
+          if (group) return group.has(norm);
+          return countryRaw === selectedCountry;
+        })
       : industryFiltered;
 
     const getScore = (item: FundamentalRecord, keyList: string[]) => {
@@ -1394,7 +1440,9 @@ export function TickersPage() {
                 onChange={(e) => setSelectedCountry(e.target.value)}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-inner focus:border-slate-300 focus:outline-none"
               >
+              
                 <option value="">Tutti i paesi</option>
+
                 {countryOptions.map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
