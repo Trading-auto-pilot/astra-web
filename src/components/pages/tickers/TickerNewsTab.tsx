@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { fetchFmpArticles, fetchGeneralLatest, fetchStockLatest, fetchStockSearch } from "../../../api/fundamentals";
 
 type ProviderTab = "fmp" | "general" | "stockLatest" | "stockSearch";
@@ -18,6 +18,14 @@ type NormalizedArticle = {
   symbols?: string[];
   publishedLabel: string;
   ts: number;
+};
+
+const PAGE_SIZE = 3;
+const summaryClampStyle: CSSProperties = {
+  display: "-webkit-box",
+  WebkitLineClamp: 3,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
 };
 
 const providers: { id: ProviderTab; label: string }[] = [
@@ -42,6 +50,8 @@ const formatDate = (value: string | number | Date | undefined) => {
 
 export function TickerNewsTab({ symbol }: Props) {
   const [providerTab, setProviderTab] = useState<ProviderTab>("fmp");
+  const [page, setPage] = useState(1);
+  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
   const [fmpStatus, setFmpStatus] = useState<NewsStatus>("idle");
   const [fmpArticles, setFmpArticles] = useState<any[]>([]);
   const [generalStatus, setGeneralStatus] = useState<NewsStatus>("idle");
@@ -263,6 +273,61 @@ export function TickerNewsTab({ symbol }: Props) {
       .sort((a, b) => b.ts - a.ts);
   }, [currentArticles, symbol, providerTab]);
 
+  useEffect(() => {
+    setPage(1);
+    setExpandedSummaries(new Set());
+  }, [providerTab, symbol]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(normalized.length / PAGE_SIZE));
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [normalized.length, page]);
+
+  const renderPagination = (currentPage: number, totalPages: number) => {
+    if (totalPages <= 1) return null;
+
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-sm">
+        <button
+          type="button"
+          onClick={() => setPage(Math.max(1, currentPage - 1))}
+          disabled={currentPage === 1}
+          className="rounded-md px-3 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Precedente
+        </button>
+        <div className="flex flex-wrap items-center gap-1">
+          {Array.from({ length: totalPages }).map((_, idx) => {
+            const pageNumber = idx + 1;
+            const active = pageNumber === currentPage;
+            return (
+              <button
+                key={pageNumber}
+                type="button"
+                onClick={() => setPage(pageNumber)}
+                className={`min-w-[2rem] rounded-md px-2 py-1 text-sm font-semibold transition ${
+                  active ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                {pageNumber}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+          disabled={currentPage === totalPages}
+          className="rounded-md px-3 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Successiva
+        </button>
+      </div>
+    );
+  };
+
   const renderContent = (status: NewsStatus, provider: ProviderTab) => {
     if (!symbol) {
       return <div className="text-sm text-slate-600">Seleziona un ticker per vedere le news.</div>;
@@ -301,9 +366,17 @@ export function TickerNewsTab({ symbol }: Props) {
       );
     }
 
+    const totalPages = Math.max(1, Math.ceil(normalized.length / PAGE_SIZE));
+    const safePage = Math.min(page, totalPages);
+    const startIndex = (safePage - 1) * PAGE_SIZE;
+    const pageArticles = normalized.slice(startIndex, startIndex + PAGE_SIZE);
+
     return (
       <div className="space-y-3">
-        {normalized.slice(0, 20).map((article) => {
+        {renderPagination(safePage, totalPages)}
+        {pageArticles.map((article) => {
+          const isFmp = providerTab === "fmp";
+          const isExpanded = expandedSummaries.has(article.id);
           return (
             <article
               key={article.id}
@@ -339,20 +412,43 @@ export function TickerNewsTab({ symbol }: Props) {
                   </a>
                   {article.symbols && article.symbols.length > 0 && (
                     <div className="mt-1 text-[11px] text-slate-500">
-                      {article.symbols.map((sym) => sym.toUpperCase()).join(" • ")}
+                      {article.symbols.map((sym) => sym.toUpperCase()).join(" \u2022 ")}
                     </div>
                   )}
                 </div>
               </div>
               {article.summary && (
-                <div
-                  className="prose prose-sm max-w-none text-slate-700"
-                  dangerouslySetInnerHTML={{ __html: article.summary }}
-                />
+                <div className="space-y-2">
+                  <div
+                    className="prose prose-sm max-w-none text-slate-700"
+                    style={isFmp && !isExpanded ? summaryClampStyle : undefined}
+                    dangerouslySetInnerHTML={{ __html: article.summary }}
+                  />
+                  {isFmp && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedSummaries((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(article.id)) {
+                            next.delete(article.id);
+                          } else {
+                            next.add(article.id);
+                          }
+                          return next;
+                        })
+                      }
+                      className="text-sm font-semibold text-slate-700 underline decoration-slate-400 underline-offset-4 hover:text-slate-900"
+                    >
+                      {isExpanded ? "Mostra meno" : "Mostra tutto"}
+                    </button>
+                  )}
+                </div>
               )}
             </article>
           );
         })}
+        {renderPagination(safePage, totalPages)}
       </div>
     );
   };

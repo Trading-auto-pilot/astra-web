@@ -39,6 +39,7 @@ const FMP_ARTICLES_ENDPOINT = "https://financialmodelingprep.com/stable/fmp-arti
 const FMP_GENERAL_LATEST_ENDPOINT = "https://financialmodelingprep.com/stable/news/general-latest";
 const FMP_STOCK_LATEST_ENDPOINT = "https://financialmodelingprep.com/stable/news/stock-latest";
 const FMP_STOCK_SEARCH_ENDPOINT = "https://financialmodelingprep.com/stable/news/stock";
+const FMP_EOD_LIGHT_ENDPOINT = "https://financialmodelingprep.com/stable/historical-price-eod/light";
 
 const parseJsonSafely = async (response: Response) => {
   const text = await response.text();
@@ -387,6 +388,27 @@ export async function fetchStockSearch(symbol: string, signal?: AbortSignal): Pr
 
   if (Array.isArray(data)) return data;
   if (Array.isArray((data as any)?.data)) return (data as any).data;
+  if (Array.isArray((data as any)?.results)) return (data as any).results;
+  return [];
+}
+
+export async function fetchFmpEodLight(symbol: string, signal?: AbortSignal): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_EOD_LIGHT_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+
+  const res = await fetch(url, { method: "GET", signal });
+  const data = await parseJsonSafely(res);
+
+  if (!res.ok) {
+    const message = (data as any)?.message ?? "EOD light fetch failed";
+    throw new Error(typeof message === "string" ? message : "EOD light fetch failed");
+  }
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray((data as any)?.historical)) return (data as any).historical;
   if (Array.isArray((data as any)?.results)) return (data as any).results;
   return [];
 }
