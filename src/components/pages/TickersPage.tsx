@@ -27,6 +27,7 @@ import TickerAnalysisTab from "./tickers/TickerAnalysisTab";
 import TickerFinancialReportTab from "./tickers/TickerFinancialReportTab";
 import TickerSegmentationTab from "./tickers/TickerSegmentationTab";
 import TickerNewsTab from "./tickers/TickerNewsTab";
+import TickerChartTab from "./tickers/TickerChartTab";
 import { env } from "../../config/env";
 
 type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total";
@@ -93,8 +94,8 @@ export function TickersPage() {
   const [fmpInfo, setFmpInfo] = useState<any | null>(null);
   const [fmpStatus, setFmpStatus] = useState<"idle" | "loading" | "error" | "no-key">("idle");
   const [infoTab, setInfoTab] = useState<
-    "detail" | "statement" | "ratios" | "score" | "financialReport" | "segmentation" | "news"
-  >("detail");
+    "chart" | "detail" | "statement" | "ratios" | "score" | "financialReport" | "segmentation" | "news"
+  >("chart");
   const [statementTab, setStatementTab] = useState<"income" | "balance" | "cash">("income");
   const [statementData, setStatementData] = useState<Record<string, { docs: any[]; status: StatementStatus }>>({
     income: { docs: [], status: "idle" },
@@ -1163,12 +1164,15 @@ export function TickersPage() {
                   ? "Segmentation"
                   : infoTab === "news"
                   ? "News"
+                  : infoTab === "chart"
+                  ? "Chart"
                   : "Financial Report"
                 }
                 subTitle="Tutti i campi disponibili per il ticker"
               />
               <div className="flex gap-2">
                 {[
+                  { id: "chart" as const, label: "Chart" },
                   { id: "detail" as const, label: "Dettaglio" },
                   { id: "statement" as const, label: "Statement" },
                   { id: "ratios" as const, label: "Ratios" },
@@ -1196,6 +1200,8 @@ export function TickersPage() {
           </div>
 
           <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-4">
+            {infoTab === "chart" && <TickerChartTab symbol={selectedSymbol} />}
+
             {infoTab === "detail" && <TickerDetailTab detailRows={detailRows} />}
 
             {infoTab === "statement" && (
