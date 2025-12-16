@@ -40,6 +40,8 @@ const FMP_GENERAL_LATEST_ENDPOINT = "https://financialmodelingprep.com/stable/ne
 const FMP_STOCK_LATEST_ENDPOINT = "https://financialmodelingprep.com/stable/news/stock-latest";
 const FMP_STOCK_SEARCH_ENDPOINT = "https://financialmodelingprep.com/stable/news/stock";
 const FMP_EOD_LIGHT_ENDPOINT = "https://financialmodelingprep.com/stable/historical-price-eod/light";
+const FMP_EOD_FULL_ENDPOINT = "https://financialmodelingprep.com/stable/historical-price-eod/full";
+const FMP_HISTORICAL_CHART_ENDPOINT = "https://financialmodelingprep.com/stable/historical-chart";
 
 const parseJsonSafely = async (response: Response) => {
   const text = await response.text();
@@ -323,7 +325,7 @@ export async function fetchFmpArticles(symbol: string, signal?: AbortSignal): Pr
   return [];
 }
 
-export async function fetchGeneralLatest(symbol: string, signal?: AbortSignal): Promise<any[]> {
+export async function fetchGeneralLatest(_symbol: string, signal?: AbortSignal): Promise<any[]> {
   if (!env.fmpApiKey) {
     throw new Error("Missing FMP API key");
   }
@@ -347,7 +349,7 @@ export async function fetchGeneralLatest(symbol: string, signal?: AbortSignal): 
   return [];
 }
 
-export async function fetchStockLatest(symbol: string, signal?: AbortSignal): Promise<any[]> {
+export async function fetchStockLatest(_symbol: string, signal?: AbortSignal): Promise<any[]> {
   if (!env.fmpApiKey) {
     throw new Error("Missing FMP API key");
   }
@@ -392,19 +394,83 @@ export async function fetchStockSearch(symbol: string, signal?: AbortSignal): Pr
   return [];
 }
 
-export async function fetchFmpEodLight(symbol: string, signal?: AbortSignal): Promise<any[]> {
+export async function fetchFmpEodLight(
+  symbol: string,
+  params?: { from?: string; to?: string },
+  signal?: AbortSignal
+): Promise<any[]> {
   if (!env.fmpApiKey) {
     throw new Error("Missing FMP API key");
   }
 
-  const url = `${FMP_EOD_LIGHT_ENDPOINT}?symbol=${encodeURIComponent(symbol)}&apikey=${env.fmpApiKey}`;
+  const url = new URL(FMP_EOD_LIGHT_ENDPOINT);
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("apikey", env.fmpApiKey);
+  if (params?.from) url.searchParams.set("from", params.from);
+  if (params?.to) url.searchParams.set("to", params.to);
 
-  const res = await fetch(url, { method: "GET", signal });
+  const res = await fetch(url.toString(), { method: "GET", signal });
   const data = await parseJsonSafely(res);
 
   if (!res.ok) {
     const message = (data as any)?.message ?? "EOD light fetch failed";
     throw new Error(typeof message === "string" ? message : "EOD light fetch failed");
+  }
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray((data as any)?.historical)) return (data as any).historical;
+  if (Array.isArray((data as any)?.results)) return (data as any).results;
+  return [];
+}
+
+export async function fetchFmpEodFull(
+  symbol: string,
+  params?: { from?: string; to?: string },
+  signal?: AbortSignal
+): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = new URL(FMP_EOD_FULL_ENDPOINT);
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("apikey", env.fmpApiKey);
+  if (params?.from) url.searchParams.set("from", params.from);
+  if (params?.to) url.searchParams.set("to", params.to);
+
+  const res = await fetch(url.toString(), { method: "GET", signal });
+  const data = await parseJsonSafely(res);
+
+  if (!res.ok) {
+    const message = (data as any)?.message ?? "EOD full fetch failed";
+    throw new Error(typeof message === "string" ? message : "EOD full fetch failed");
+  }
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray((data as any)?.historical)) return (data as any).historical;
+  if (Array.isArray((data as any)?.results)) return (data as any).results;
+  return [];
+}
+
+export async function fetchFmpHistoricalChart(
+  symbol: string,
+  interval: string,
+  signal?: AbortSignal
+): Promise<any[]> {
+  if (!env.fmpApiKey) {
+    throw new Error("Missing FMP API key");
+  }
+
+  const url = `${FMP_HISTORICAL_CHART_ENDPOINT}/${encodeURIComponent(interval)}?symbol=${encodeURIComponent(
+    symbol
+  )}&apikey=${env.fmpApiKey}`;
+
+  const res = await fetch(url, { method: "GET", signal });
+  const data = await parseJsonSafely(res);
+
+  if (!res.ok) {
+    const message = (data as any)?.message ?? "Historical chart fetch failed";
+    throw new Error(typeof message === "string" ? message : "Historical chart fetch failed");
   }
 
   if (Array.isArray(data)) return data;
