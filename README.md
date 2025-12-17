@@ -72,3 +72,13 @@ export default defineConfig([
 ])
 ```
 # astra.ai
+
+## Environment / backend target
+
+Il frontend legge la base URL del backend da `VITE_API_BASE_URL` (o `VITE_API_BASE`) in `src/config/env.ts`.
+
+- Override locale (consigliato): crea `.env.local` con ad esempio `VITE_API_BASE_URL=http://localhost:8080`
+- Override per ambiente Vite: crea `.env.staging.local` e usa `npm run dev:staging` / `npm run build:staging`
+
+Esempio pronto da copiare: `.env.example`.
+

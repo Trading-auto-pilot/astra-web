@@ -6,6 +6,7 @@ import AppIcon from "../atoms/icon/AppIcon";
 import ChartLegend from "../molecules/charts/ChartLegend";
 import ECharts from "../molecules/charts/ECharts";
 import TickersPage from "./TickersPage";
+import UsersPage from "./UsersPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
@@ -29,20 +30,34 @@ export type DashboardPageProps = {
   extraContent?: ReactNode;
 };
 
-type DashboardSection = "overview" | "tickers";
+type AppSection = "overview" | "tickers" | "users" | "scheduler";
 
-const getDashboardSection = (): DashboardSection => {
+const getAppSection = (): AppSection => {
   if (typeof window === "undefined") return "overview";
   const cleaned = window.location.hash.replace(/^#\/?/, "");
-  const [, section] = cleaned.split("/");
-  return section === "tickers" ? "tickers" : "overview";
+  const parts = cleaned.split(/[/?]/).filter(Boolean);
+
+  if (parts[0] === "overview") return "overview";
+
+  if (parts[0] === "dashboard") {
+    if (parts[1] === "tickers") return "tickers";
+    return "overview";
+  }
+
+  if (parts[0] === "admin") {
+    if (parts[1] === "users") return "users";
+    if (parts[1] === "scheduler") return "scheduler";
+    return "overview";
+  }
+
+  return "overview";
 };
 
 export function DashboardPage({ extraContent, userName, navEntries }: DashboardPageProps) {
-  const [section, setSection] = useState<DashboardSection>(() => getDashboardSection());
+  const [section, setSection] = useState<AppSection>(() => getAppSection());
 
   useEffect(() => {
-    const syncSection = () => setSection(getDashboardSection());
+    const syncSection = () => setSection(getAppSection());
     window.addEventListener("hashchange", syncSection);
     syncSection();
     return () => window.removeEventListener("hashchange", syncSection);
@@ -52,6 +67,27 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <TickersPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "users") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <UsersPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "scheduler") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <div className="space-y-6">
+          <SectionHeader title="Scheduler" subTitle="Gestione scheduler" />
+          <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
+            Pagina Scheduler (TODO).
+          </div>
+        </div>
       </DashboardLayout>
     );
   }
@@ -73,12 +109,11 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
           }
         />
 
+        {extraContent}
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {summary.map((item) => (
-            <div
-              key={item.label}
-              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-            >
+            <div key={item.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-xs uppercase tracking-wide text-slate-500">{item.label}</div>
               <div className="mt-2 text-2xl font-semibold text-slate-900">{item.value}</div>
               <Badge tone={item.trend.startsWith("-") ? "warning" : "success"} className="mt-2">
@@ -110,32 +145,12 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
             <SectionHeader title="Azioni rapide" subTitle="Gestisci rapidamente il workspace" />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <BaseButton startIcon={<AppIcon icon="mdi:plus" />}>Nuovo report</BaseButton>
-              <BaseButton
-                variant="outline"
-                color="neutral"
-                startIcon={<AppIcon icon="mdi:account-group-outline" />}
-              >
+              <BaseButton variant="outline" color="neutral" startIcon={<AppIcon icon="mdi:account-group-outline" />}>
                 Invita team
-              </BaseButton>
-              <BaseButton
-                variant="outline"
-                color="neutral"
-                startIcon={<AppIcon icon="mdi:chart-line" />}
-              >
-                Vedi analitiche
-              </BaseButton>
-              <BaseButton
-                variant="outline"
-                color="neutral"
-                startIcon={<AppIcon icon="mdi:cog-outline" />}
-              >
-                Impostazioni
               </BaseButton>
             </div>
           </div>
         </div>
-
-        {extraContent}
       </div>
     </DashboardLayout>
   );

@@ -9,7 +9,15 @@ import Logo from "./components/atoms/media/Logo";
 import LoginPage from "./components/pages/auth/LoginPage";
 import BaseButton from "./components/atoms/base/buttons/BaseButton";
 
-type RouteId = "landing" | "maintenance" | "contact" | "login" | "dashboard" | "404";
+type RouteId =
+  | "landing"
+  | "maintenance"
+  | "contact"
+  | "login"
+  | "overview"
+  | "dashboard"
+  | "admin"
+  | "404";
 
 const normalizeHash = (hash: string): RouteId => {
   const cleaned = (hash || "#/landing").replace(/^#\/?/, "");
@@ -23,8 +31,12 @@ const normalizeHash = (hash: string): RouteId => {
       return "contact";
     case "login":
       return "login";
+    case "overview":
+      return "overview";
     case "dashboard":
       return "dashboard";
+    case "admin":
+      return "admin";
     case "404":
       return "404";
     default:
@@ -32,7 +44,73 @@ const normalizeHash = (hash: string): RouteId => {
   }
 };
 
-const PROTECTED_ROUTES = new Set<RouteId>(["dashboard"]);
+const getPermissionKeyFromHash = (hash: string): string => {
+  const cleaned = String(hash || "#/overview")
+    .replace(/^#\/?/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+
+  const parts = cleaned.split(/[/?]/).filter(Boolean);
+  const base = parts[0] || "overview";
+
+  if (base === "overview") return "overview";
+
+  if (base === "dashboard") {
+    // /dashboard/tickers/TSLA -> dashboard/tickers
+    const section = parts[1];
+    if (section === "tickers") return "dashboard/tickers";
+    return "dashboard";
+  }
+
+  if (base === "admin") {
+    const section = parts[1];
+    if (section === "users") return "admin/users";
+    if (section === "scheduler") return "admin/scheduler";
+    return "admin";
+  }
+
+  return base;
+};
+
+const normalizeClientNavPage = (page: string): string => {
+  const trimmed = String(page || "").trim();
+  if (!trimmed) return "";
+
+  const cleaned = trimmed
+    .replace(/^#\/?/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+
+  if (!cleaned) return "";
+
+  // Canonical pages (DB fixed)
+  if (cleaned === "overview") return "overview";
+  if (cleaned === "dashboard/tickers") return "dashboard/tickers";
+  if (cleaned === "admin/users") return "admin/users";
+  if (cleaned === "admin/scheduler") return "admin/scheduler";
+
+  // Small backward-compatible fallbacks
+  if (cleaned === "tickers") return "dashboard/tickers";
+  if (cleaned === "users") return "admin/users";
+  if (cleaned === "scheduler") return "admin/scheduler";
+
+  return cleaned;
+};
+
+const normalizeAllowedPages = (rawPages: string[]): string[] => {
+  const normalized = rawPages
+    .map((p) => normalizeClientNavPage(p))
+    .filter(Boolean);
+
+  // Always allow Overview as safe fallback.
+  if (!normalized.includes("overview")) {
+    normalized.unshift("overview");
+  }
+
+  return Array.from(new Set(normalized));
+};
+
+const PROTECTED_ROUTES = new Set<RouteId>(["overview", "dashboard", "admin"]);
 const NAV_CACHE_KEY = "astraai:auth:clientNavigation";
 const USERNAME_CACHE_KEY = "astraai:auth:username";
 const USERNAME_LOGIN_KEY = "astraai:login:username";
@@ -56,9 +134,12 @@ export default function App() {
   const [userName, setUserName] = useState<string | null>(() => {
     return localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
   });
+
   const allowedPagesRef = useRef<string[] | null>(null);
   const navTokenRef = useRef<string | null>(null);
-  const showNav = !["landing", "login", "dashboard"].includes(route);
+
+  // Show the public top nav only on public pages.
+  const showNav = !["landing", "login", "overview", "dashboard", "admin"].includes(route);
 
   const setHash = (id: RouteId) => {
     window.location.hash = `/${id}`;
@@ -71,45 +152,54 @@ export default function App() {
     setRoute(id);
   }, []);
 
-  const ensureClientNavigation = useCallback(
-    async (token?: string): Promise<string[]> => {
-      const storedToken = token ?? (localStorage.getItem("astraai:auth:token") || undefined);
-      const tokenMarker = storedToken ?? null;
+  const ensureClientNavigation = useCallback(async (token?: string): Promise<string[]> => {
+    const storedToken = token ?? (localStorage.getItem("astraai:auth:token") || undefined);
+    const tokenMarker = storedToken ?? null;
 
-      if (allowedPagesRef.current && navTokenRef.current === tokenMarker) {
-        return allowedPagesRef.current;
-      }
+    if (allowedPagesRef.current && navTokenRef.current === tokenMarker) {
+      return allowedPagesRef.current;
+    }
 
-      const cachedName =
-        localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
-      if (cachedName) {
-        setUserName((prev) => prev || cachedName);
-      }
+    const cachedName = localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
+    if (cachedName) {
+      setUserName((prev) => prev || cachedName);
+    }
 
-      const profile = await fetchCurrentAdmin(storedToken);
-      const entries = Array.isArray((profile as any).clientNavigation)
-        ? (profile as any).clientNavigation
-        : [];
-      setNavEntries(entries);
-      const pages = entries
+    const profile = await fetchCurrentAdmin(storedToken);
+    const entries = Array.isArray((profile as any).clientNavigation)
+      ? (profile as any).clientNavigation
+      : [];
+
+    const normalizedEntries = entries.map((entry: any) => ({
+      ...entry,
+      page: typeof entry?.page === "string" ? normalizeClientNavPage(entry.page) : entry?.page,
+    }));
+
+    setNavEntries(normalizedEntries);
+
+    const pages = normalizeAllowedPages(
+      entries
         .map((entry: any) => entry?.page)
-        .filter((p: unknown): p is string => Boolean(p));
-      allowedPagesRef.current = pages;
-      navTokenRef.current = tokenMarker;
-      if (profile && typeof (profile as any).username === "string") {
-        setUserName((profile as any).username);
-        localStorage.setItem(USERNAME_CACHE_KEY, (profile as any).username);
-        localStorage.setItem(USERNAME_LOGIN_KEY, (profile as any).username);
-      }
-      try {
-        localStorage.setItem(NAV_CACHE_KEY, JSON.stringify(entries));
-      } catch {
-        // ignore cache write errors
-      }
-      return pages;
-    },
-    []
-  );
+        .filter((p: unknown): p is string => Boolean(p))
+    );
+
+    allowedPagesRef.current = pages;
+    navTokenRef.current = tokenMarker;
+
+    if (profile && typeof (profile as any).username === "string") {
+      setUserName((profile as any).username);
+      localStorage.setItem(USERNAME_CACHE_KEY, (profile as any).username);
+      localStorage.setItem(USERNAME_LOGIN_KEY, (profile as any).username);
+    }
+
+    try {
+      localStorage.setItem(NAV_CACHE_KEY, JSON.stringify(normalizedEntries));
+    } catch {
+      // ignore cache write errors
+    }
+
+    return pages;
+  }, []);
 
   const guardAndNavigate = useCallback(
     async (target: RouteId, fromHashChange = false) => {
@@ -125,11 +215,21 @@ export default function App() {
       setAuthChecking(true);
       try {
         const allowedPages = await ensureClientNavigation(token);
-        if (allowedPages.includes(target)) {
+        const requestedHash = typeof window !== "undefined" ? window.location.hash : "";
+        const permissionKey = normalizeClientNavPage(getPermissionKeyFromHash(requestedHash));
+
+        if (allowedPages.includes(permissionKey)) {
           redirectTo(target, fromHashChange);
-        } else {
-          redirectTo("404", fromHashChange);
+          return;
         }
+
+        // Safe fallback: overview.
+        if (allowedPages.includes("overview")) {
+          redirectTo("overview", false);
+          return;
+        }
+
+        redirectTo("404", fromHashChange);
       } catch (error) {
         console.error("Auth check failed", error);
         if (token) {
@@ -168,7 +268,9 @@ export default function App() {
         return <ContactPage />;
       case "login":
         return <LoginPage />;
+      case "overview":
       case "dashboard":
+      case "admin":
         return <DashboardPage userName={userName ?? undefined} navEntries={navEntries} />;
       default:
         return <NotFoundPage />;
@@ -205,14 +307,6 @@ export default function App() {
                 onClick={() => setHash("contact")}
               >
                 Contact
-              </BaseButton>
-              <BaseButton
-                variant={route === "dashboard" ? "solid" : "outline"}
-                color="neutral"
-                size="sm"
-                onClick={() => setHash("dashboard")}
-              >
-                Dashboard
               </BaseButton>
               <BaseButton
                 variant={route === "login" ? "solid" : "outline"}

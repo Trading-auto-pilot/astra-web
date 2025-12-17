@@ -47,7 +47,7 @@ export default function LoginPage() {
       } else {
         localStorage.removeItem("astraai:login:username");
       }
-      window.location.hash = "/dashboard";
+      window.location.hash = "/overview";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Accesso non riuscito";
