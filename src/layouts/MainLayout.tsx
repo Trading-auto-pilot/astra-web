@@ -10,6 +10,12 @@ export type MainLayoutProps = {
   navEntries?: any[];
 };
 
+type NavLink = {
+  label: string;
+  href?: string;
+  children?: NavLink[];
+};
+
 const formatLabel = (slug: string) =>
   slug
     .split(/[-_/]/)
@@ -17,25 +23,65 @@ const formatLabel = (slug: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 
-const buildNavLinks = (navEntries?: any[]) => {
-  const links = [
-    { label: "Overview", href: "#/dashboard" },
-    { label: "Tickers", href: "#/dashboard/tickers" },
-  ];
-  if (!Array.isArray(navEntries)) return links;
+const buildNavLinks = (navEntries?: any[]): NavLink[] => {
+  const normalizeClientNavPage = (page: string): string => {
+    const trimmed = String(page || "").trim();
+    if (!trimmed) return "";
+    return trimmed
+      .replace(/^#\/?/, "")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+  };
+
+  const links: NavLink[] = [{ label: "Overview", href: "#/overview" }];
+
+  if (!Array.isArray(navEntries)) {
+    return links;
+  }
+
+  const dashboardChildren: NavLink[] = [];
+  const adminChildren: NavLink[] = [];
 
   navEntries.forEach((entry) => {
-    const page = entry?.page;
-    if (typeof page !== "string") return;
-    if (!page.startsWith("dashboard/")) return;
-    const segment = page.replace(/^dashboard\//, "");
-    if (!segment) return;
-    const href = `#/dashboard/${segment}`;
-    const label = formatLabel(segment);
-    if (!links.some((l) => l.href === href)) {
-      links.push({ label, href });
+    const rawPage = entry?.page;
+    if (typeof rawPage !== "string") return;
+    const page = normalizeClientNavPage(rawPage);
+
+    if (page === "dashboard/tickers") {
+      const href = "#/dashboard/tickers";
+      if (!dashboardChildren.some((child) => child.href === href)) {
+        dashboardChildren.push({ label: "Tickers", href });
+      }
+      return;
+    }
+
+    if (page.startsWith("admin/")) {
+      const segment = page.replace(/^admin\//, "");
+      if (!segment) return;
+      const href = `#/admin/${segment}`;
+      const label = formatLabel(segment);
+      if (!adminChildren.some((child) => child.href === href)) {
+        adminChildren.push({ label, href });
+      }
+      return;
     }
   });
+
+  if (dashboardChildren.length) {
+    links.push({ label: "Dashboard", children: dashboardChildren });
+  }
+
+  if (adminChildren.length) {
+    const order = { users: 0, scheduler: 1 } as Record<string, number>;
+    adminChildren.sort((a, b) => {
+      const aKey = String(a.href || "").replace(/^#\/admin\//, "");
+      const bKey = String(b.href || "").replace(/^#\/admin\//, "");
+      return (order[aKey] ?? 99) - (order[bKey] ?? 99);
+    });
+
+    links.push({ label: "Admin", children: adminChildren });
+  }
+
   return links;
 };
 
@@ -49,7 +95,7 @@ export function MainLayout({
   void title;
   const release = useRelease();
   const navLinks = buildNavLinks(navEntries);
-  const currentHash = typeof window !== "undefined" ? window.location.hash || "#/dashboard" : "#/dashboard";
+  const currentHash = typeof window !== "undefined" ? window.location.hash || "#/overview" : "#/overview";
   const [openNav, setOpenNav] = useState(false);
 
   const closeNav = () => setOpenNav(false);
@@ -77,14 +123,50 @@ export function MainLayout({
         </div>
         <nav className="mt-6 space-y-2 text-sm text-slate-700">
           {navLinks.map((link) => {
-            const isActive = currentHash === link.href || currentHash.startsWith(`${link.href}/`);
+            if (link.children && link.children.length) {
+              const activeChild = link.children.some(
+                (child) =>
+                  child.href && (currentHash === child.href || currentHash.startsWith(`${child.href}/`))
+              );
+              return (
+                <div key={link.label} className="space-y-1">
+                  <div
+                    className={`px-3 py-2 text-[11px] font-semibold uppercase tracking-wide ${
+                      activeChild ? "text-slate-800" : "text-slate-500"
+                    }`}
+                  >
+                    {link.label}
+                  </div>
+                  <div className="space-y-1 pl-2">
+                    {link.children.map((child) => {
+                      const isActive =
+                        child.href && (currentHash === child.href || currentHash.startsWith(`${child.href}/`));
+                      return (
+                        <a
+                          key={child.href ?? child.label}
+                          className={`block rounded-md px-3 py-2 hover:bg-slate-100 ${
+                            isActive ? "bg-slate-100 font-semibold text-slate-900" : ""
+                          }`}
+                          href={child.href ?? "#"}
+                          onClick={closeNav}
+                        >
+                          {child.label}
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+
+            const isActive = link.href && (currentHash === link.href || currentHash.startsWith(`${link.href}/`));
             return (
               <a
-                key={link.href}
+                key={link.href ?? link.label}
                 className={`block rounded-md px-3 py-2 hover:bg-slate-100 ${
                   isActive ? "bg-slate-100 font-semibold text-slate-900" : ""
                 }`}
-                href={link.href}
+                href={link.href ?? "#"}
                 onClick={closeNav}
               >
                 {link.label}
