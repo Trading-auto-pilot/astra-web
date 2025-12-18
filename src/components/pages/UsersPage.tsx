@@ -77,6 +77,7 @@ const NAV_PAGE_OPTIONS: { label: string; value: string }[] = [
   { label: "Overview", value: "overview" },
   { label: "Tickers", value: "dashboard/tickers" },
   { label: "Users", value: "admin/users" },
+  { label: "API Key", value: "admin/api_key" },
   { label: "Scheduler", value: "admin/scheduler" },
 ];
 

@@ -7,6 +7,7 @@ import ChartLegend from "../molecules/charts/ChartLegend";
 import ECharts from "../molecules/charts/ECharts";
 import TickersPage from "./TickersPage";
 import UsersPage from "./UsersPage";
+import ApiKeysPage from "./ApiKeysPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
@@ -30,7 +31,7 @@ export type DashboardPageProps = {
   extraContent?: ReactNode;
 };
 
-type AppSection = "overview" | "tickers" | "users" | "scheduler";
+type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys";
 
 const getAppSection = (): AppSection => {
   if (typeof window === "undefined") return "overview";
@@ -47,6 +48,7 @@ const getAppSection = (): AppSection => {
   if (parts[0] === "admin") {
     if (parts[1] === "users") return "users";
     if (parts[1] === "scheduler") return "scheduler";
+    if (parts[1] === "api_key") return "apiKeys";
     return "overview";
   }
 
@@ -75,6 +77,14 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <UsersPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "apiKeys") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <ApiKeysPage />
       </DashboardLayout>
     );
   }
