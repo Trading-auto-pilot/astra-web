@@ -7,6 +7,7 @@ import ChartLegend from "../molecules/charts/ChartLegend";
 import ECharts from "../molecules/charts/ECharts";
 import TickersPage from "./TickersPage";
 import UsersPage from "./UsersPage";
+import SchedulerPage from "./SchedulerPage";
 import ApiKeysPage from "./ApiKeysPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -92,12 +93,7 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
   if (section === "scheduler") {
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
-        <div className="space-y-6">
-          <SectionHeader title="Scheduler" subTitle="Gestione scheduler" />
-          <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
-            Pagina Scheduler (TODO).
-          </div>
-        </div>
+        <SchedulerPage />
       </DashboardLayout>
     );
   }
