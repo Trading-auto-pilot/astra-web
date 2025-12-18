@@ -1,5 +1,10 @@
 import { env } from "../config/env";
 
+export type SchedulerRetry = {
+  maxAttempts?: number | string;
+  backoffMs?: number | string;
+};
+
 export type SchedulerJob = {
   id?: number | string;
   jobKey?: string;
@@ -8,6 +13,8 @@ export type SchedulerJob = {
   method?: string;
   url?: string;
   timezone?: string;
+  timeoutMs?: number | string;
+  retry?: SchedulerRetry;
   rules?: Array<Record<string, unknown>>;
   [key: string]: unknown;
 };
