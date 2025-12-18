@@ -66,6 +66,7 @@ const getPermissionKeyFromHash = (hash: string): string => {
     const section = parts[1];
     if (section === "users") return "admin/users";
     if (section === "scheduler") return "admin/scheduler";
+    if (section === "api_key") return "admin/api_key";
     return "admin";
   }
 
@@ -90,6 +91,7 @@ const normalizeClientNavPage = (page: string): string => {
   if (cleaned === "admin/*" || cleaned === "admin") return "admin/*";
   if (cleaned === "admin/users") return "admin/users";
   if (cleaned === "admin/scheduler") return "admin/scheduler";
+  if (cleaned === "admin/api_key") return "admin/api_key";
 
   // Small backward-compatible fallbacks
   if (cleaned === "tickers") return "dashboard/tickers";
@@ -114,6 +116,7 @@ const normalizeAllowedPages = (rawPages: string[]): string[] => {
   if (normalized.includes("admin/*") || normalized.includes("admin")) {
     if (!expanded.includes("admin/users")) expanded.push("admin/users");
     if (!expanded.includes("admin/scheduler")) expanded.push("admin/scheduler");
+    if (!expanded.includes("admin/api_key")) expanded.push("admin/api_key");
   }
 
   // Always allow Overview as safe fallback.

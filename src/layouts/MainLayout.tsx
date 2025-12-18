@@ -56,9 +56,9 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     }
 
     if (page === "admin/*" || page === "admin") {
-      ["users", "scheduler"].forEach((segment) => {
+      ["users", "api_key", "scheduler"].forEach((segment) => {
         const href = `#/admin/${segment}`;
-        const label = formatLabel(segment);
+        const label = formatLabel(segment === "api_key" ? "API Key" : segment);
         if (!adminChildren.some((child) => child.href === href)) {
           adminChildren.push({ label, href });
         }
@@ -70,7 +70,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
       const segment = page.replace(/^admin\//, "");
       if (!segment) return;
       const href = `#/admin/${segment}`;
-      const label = formatLabel(segment);
+      const label = segment === "api_key" ? "API Key" : formatLabel(segment);
       if (!adminChildren.some((child) => child.href === href)) {
         adminChildren.push({ label, href });
       }
@@ -83,7 +83,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
   }
 
   if (adminChildren.length) {
-    const order = { users: 0, scheduler: 1 } as Record<string, number>;
+    const order = { users: 0, api_key: 1, scheduler: 2 } as Record<string, number>;
     adminChildren.sort((a, b) => {
       const aKey = String(a.href || "").replace(/^#\/admin\//, "");
       const bKey = String(b.href || "").replace(/^#\/admin\//, "");
