@@ -66,6 +66,32 @@ const formatNumber = (value: number | null) => {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
 };
 
+const getUpdateDeltaHours = (value: unknown) => {
+  if (!value) return "-";
+  const date = new Date(value as any);
+  if (Number.isNaN(date.getTime())) return "-";
+  const diffMs = Date.now() - date.getTime();
+  if (!Number.isFinite(diffMs)) return "-";
+  const totalHours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+  return totalHours;
+};
+
+const formatUpdateDelta = (totalHours: number | "-") => {
+  if (totalHours === "-") return "-";
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days > 0) return `${days}d ${hours}h`;
+  return `${hours}h`;
+};
+
+const getUpdateStatusClass = (totalHours: number | "-") => {
+  if (totalHours === "-") return "bg-slate-300";
+  if (totalHours < 1) return "bg-emerald-500";
+  if (totalHours < 3) return "bg-yellow-400";
+  if (totalHours < 8) return "bg-amber-500";
+  return "bg-red-500";
+};
+
 const formatCurrency = (value: number | null, currency?: string) => {
   if (value === null || Number.isNaN(value)) return "-";
   if (currency) {
@@ -767,6 +793,14 @@ export function TickersPage() {
     return parseMomentumJson((selectedRecord as any).momentum_json);
   }, [selectedRecord]);
 
+  const rawLastUpdate =
+    (selectedRecord as any)?.updated_at ??
+    (selectedRecord as any)?.updatedAt ??
+    (fmpInfo as any)?.updated_at ??
+    (fmpInfo as any)?.updatedAt;
+
+  const lastUpdateHours = useMemo(() => getUpdateDeltaHours(rawLastUpdate), [rawLastUpdate]);
+
   const detailRows = useMemo(() => {
     if (!selectedRecord) return [];
     const rows: { key: string; value: string }[] = [];
@@ -1219,6 +1253,13 @@ export function TickersPage() {
                       (fmpInfo as any)?.currency
                     )}{" "}
                     {(fmpInfo as any)?.currency ?? ""}
+                  </div>
+                  <div className="font-semibold text-slate-600">Last update</div>
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <span
+                      className={`inline-block h-2 w-2 rounded-full ${getUpdateStatusClass(lastUpdateHours)}`}
+                    />
+                    {formatUpdateDelta(lastUpdateHours)}
                   </div>
                 </div>
               </div>
