@@ -1,6 +1,6 @@
 {
     "lastUpdate" : "12/12/2025",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "note" : [  "1.0.0 First version test in PAPER environment",
                 "1.1.0 Fix  CliNav, added icons, added detailed tickers page",
                 "1.2.0 Improving detailed ticker page",
@@ -12,6 +12,7 @@
                 "1.8.0 Aggiunta TAB Chart",
                 "1.9.0 Paesi aggregati in Europe, Asia and Latam",
                 "1.10.0 Double top Score",
-                "2.0.0 Inizio Implementazione admin tools"
+                "2.0.0 Inizio Implementazione admin tools",
+                "2.0.1 FIX puntamento a backend corretto"
             ]
 }
