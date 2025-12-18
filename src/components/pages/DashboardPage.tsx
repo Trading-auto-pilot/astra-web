@@ -9,6 +9,7 @@ import TickersPage from "./TickersPage";
 import UsersPage from "./UsersPage";
 import SchedulerPage from "./SchedulerPage";
 import ApiKeysPage from "./ApiKeysPage";
+import TickerScannerAdminPage from "./TickerScannerAdminPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
@@ -32,7 +33,7 @@ export type DashboardPageProps = {
   extraContent?: ReactNode;
 };
 
-type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys";
+type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys" | "tickerScanner";
 
 const getAppSection = (): AppSection => {
   if (typeof window === "undefined") return "overview";
@@ -50,6 +51,7 @@ const getAppSection = (): AppSection => {
     if (parts[1] === "users") return "users";
     if (parts[1] === "scheduler") return "scheduler";
     if (parts[1] === "api_key") return "apiKeys";
+    if (parts[1] === "ticker_scanner") return "tickerScanner";
     return "overview";
   }
 
@@ -94,6 +96,14 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <SchedulerPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "tickerScanner") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <TickerScannerAdminPage />
       </DashboardLayout>
     );
   }
