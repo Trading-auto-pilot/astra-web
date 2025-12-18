@@ -88,6 +88,8 @@ jobs:
 
           docker buildx build \
             --platform linux/amd64 \
+            --build-arg VITE_API_BASE_URL="${{ vars.VITE_API_BASE_URL }}" \
+            --build-arg VITE_FMP_API_KEY="${{ secrets.FMP_API_KEY }}" \
             --push \
             --tag "$DOCKERHUB_USERNAME/$NAME:latest" \
             --tag "$DOCKERHUB_USERNAME/$NAME:$VERSION" \
@@ -130,4 +132,3 @@ jobs:
             echo "🧹 Pulizia immagini inutilizzate"
             docker image prune -a -f
           EOF
-
