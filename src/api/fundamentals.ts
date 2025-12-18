@@ -21,6 +21,7 @@ export type FundamentalRecord = {
 };
 
 const FUNDAMENTALS_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/fundamentals`;
+const GLOSSARY_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/glossary`;
 const FMP_VARIANTS_ENDPOINT = "https://financialmodelingprep.com/stable/search-exchange-variants";
 const FMP_INCOME_ENDPOINT = "https://financialmodelingprep.com/stable/income-statement";
 const FMP_BALANCE_ENDPOINT = "https://financialmodelingprep.com/stable/balance-sheet-statement";
@@ -51,6 +52,42 @@ const parseJsonSafely = async (response: Response) => {
     return text;
   }
 };
+
+export type GlossaryEntry = {
+  description?: string;
+  valuation?: string;
+};
+
+export type GlossaryDoc = Record<string, GlossaryEntry>;
+
+export async function fetchGlossary(fileName: string, signal?: AbortSignal): Promise<GlossaryDoc> {
+  const normalized = String(fileName || "").trim();
+  if (!normalized) return {};
+
+  const finalName = normalized.endsWith(".json") ? normalized : `${normalized}.json`;
+  const url = `${GLOSSARY_ENDPOINT}/${encodeURIComponent(finalName)}`;
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    signal,
+  });
+
+  const data = await parseJsonSafely(res);
+
+  if (!res.ok) {
+    const message = (data as any)?.error ?? (data as any)?.message ?? "Unable to load glossary";
+    throw new Error(typeof message === "string" ? message : "Unable to load glossary");
+  }
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return {};
+  }
+
+  return data as GlossaryDoc;
+}
 
 const extractRecords = (payload: any): FundamentalRecord[] => {
   if (Array.isArray(payload)) return payload as FundamentalRecord[];

@@ -1,5 +1,5 @@
 import ReactApexChart from "react-apexcharts";
-import TickerStatementTab, { type StatementMetric } from "./TickerStatementTab";
+import TickerStatementTab, { type GlossaryDoc, type StatementMetric } from "./TickerStatementTab";
 
 export type AnalysisStatus = "idle" | "loading" | "error" | "no-key";
 
@@ -8,11 +8,36 @@ type FinancialCardProps = {
   piotroskiValue: number | null;
   scoreCurrency?: string;
   scoreTableRows: { label: string; value: string }[];
+  glossary?: GlossaryDoc | null;
 };
 
-function FinancialScoreCard({ altmanValue, piotroskiValue, scoreCurrency, scoreTableRows }: FinancialCardProps) {
+function FinancialScoreCard({ altmanValue, piotroskiValue, scoreCurrency, scoreTableRows, glossary }: FinancialCardProps) {
+  const altmanGlossary =
+    (glossary && (glossary as any).altmanZScore) ||
+    (glossary && (glossary as any).altmanScore) ||
+    null;
+  const piotroskiGlossary =
+    (glossary && (glossary as any).piotroskiScore) ||
+    (glossary && (glossary as any).piotroskiFScore) ||
+    null;
+
   return (
     <div className="space-y-4">
+      {(altmanGlossary || piotroskiGlossary) && (
+        <div className="rounded-lg border border-slate-200 bg-white/80 p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Glossary</div>
+          {altmanGlossary?.description && (
+            <div className="mt-2 text-sm text-slate-700">
+              <span className="font-semibold">Altman Z-Score:</span> {altmanGlossary.description}
+            </div>
+          )}
+          {piotroskiGlossary?.description && (
+            <div className="mt-2 text-sm text-slate-700">
+              <span className="font-semibold">Piotroski F-Score:</span> {piotroskiGlossary.description}
+            </div>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-slate-200 bg-white/70 p-3">
           <div className="text-sm font-semibold text-slate-800">Altman Z-Score</div>
@@ -106,6 +131,9 @@ type TickerAnalysisTabProps = {
   ownerStatus: AnalysisStatus;
   enterpriseMetrics: StatementMetric[];
   enterpriseStatus: AnalysisStatus;
+  financialGlossary?: GlossaryDoc | null;
+  ownerGlossary?: GlossaryDoc | null;
+  enterpriseGlossary?: GlossaryDoc | null;
 };
 
 export function TickerAnalysisTab({
@@ -120,7 +148,9 @@ export function TickerAnalysisTab({
   ownerStatus,
   enterpriseMetrics,
   enterpriseStatus,
-}: TickerAnalysisTabProps) {
+  financialGlossary,
+  ownerGlossary,
+  enterpriseGlossary,}: TickerAnalysisTabProps) {
   if (scoreStatus === "no-key") {
     return (
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
@@ -174,15 +204,16 @@ export function TickerAnalysisTab({
             piotroskiValue={piotroskiValue}
             scoreCurrency={scoreCurrency}
             scoreTableRows={scoreTableRows}
+            glossary={financialGlossary}
           />
         )}
 
         {scoreTab === "ownerEarnings" && (
-          <TickerStatementTab metrics={ownerMetrics} status={ownerStatus} />
+          <TickerStatementTab metrics={ownerMetrics} status={ownerStatus} glossary={ownerGlossary} />
         )}
 
         {scoreTab === "enterpriseValues" && (
-          <TickerStatementTab metrics={enterpriseMetrics} status={enterpriseStatus} />
+          <TickerStatementTab metrics={enterpriseMetrics} status={enterpriseStatus} glossary={enterpriseGlossary} />
         )}
       </div>
     </div>

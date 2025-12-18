@@ -85,7 +85,9 @@ const normalizeClientNavPage = (page: string): string => {
 
   // Canonical pages (DB fixed)
   if (cleaned === "overview") return "overview";
+  if (cleaned === "dashboard/*" || cleaned === "dashboard") return "dashboard/*";
   if (cleaned === "dashboard/tickers") return "dashboard/tickers";
+  if (cleaned === "admin/*" || cleaned === "admin") return "admin/*";
   if (cleaned === "admin/users") return "admin/users";
   if (cleaned === "admin/scheduler") return "admin/scheduler";
 
@@ -102,12 +104,24 @@ const normalizeAllowedPages = (rawPages: string[]): string[] => {
     .map((p) => normalizeClientNavPage(p))
     .filter(Boolean);
 
-  // Always allow Overview as safe fallback.
-  if (!normalized.includes("overview")) {
-    normalized.unshift("overview");
+  const expanded: string[] = [...normalized];
+
+  // Wildcard support: dashboard/* enables all dashboard pages.
+  if (normalized.includes("dashboard/*") || normalized.includes("dashboard")) {
+    if (!expanded.includes("dashboard/tickers")) expanded.push("dashboard/tickers");
   }
 
-  return Array.from(new Set(normalized));
+  if (normalized.includes("admin/*") || normalized.includes("admin")) {
+    if (!expanded.includes("admin/users")) expanded.push("admin/users");
+    if (!expanded.includes("admin/scheduler")) expanded.push("admin/scheduler");
+  }
+
+  // Always allow Overview as safe fallback.
+  if (!expanded.includes("overview")) {
+    expanded.unshift("overview");
+  }
+
+  return Array.from(new Set(expanded));
 };
 
 const PROTECTED_ROUTES = new Set<RouteId>(["overview", "dashboard", "admin"]);

@@ -94,8 +94,12 @@ export async function createAdminUser(payload: Record<string, unknown>): Promise
   return data as AdminUser;
 }
 
-export async function updateAdminUser(userId: string | number, payload: Record<string, unknown>): Promise<AdminUser> {
-  const token = getToken();
+export async function updateAdminUser(
+  userId: string | number,
+  payload: Record<string, unknown>,
+  tokenOverride?: string | null
+): Promise<AdminUser> {
+  const token = tokenOverride ?? getToken();
   const response = await fetch(buildUrl(`/auth/admin/user/${userId}`), {
     method: "PUT",
     credentials: "include",
