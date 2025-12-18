@@ -47,11 +47,22 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     if (typeof rawPage !== "string") return;
     const page = normalizeClientNavPage(rawPage);
 
-    if (page === "dashboard/tickers") {
+    if (page === "dashboard/*" || page === "dashboard" || page === "dashboard/tickers") {
       const href = "#/dashboard/tickers";
       if (!dashboardChildren.some((child) => child.href === href)) {
         dashboardChildren.push({ label: "Tickers", href });
       }
+      return;
+    }
+
+    if (page === "admin/*" || page === "admin") {
+      ["users", "scheduler"].forEach((segment) => {
+        const href = `#/admin/${segment}`;
+        const label = formatLabel(segment);
+        if (!adminChildren.some((child) => child.href === href)) {
+          adminChildren.push({ label, href });
+        }
+      });
       return;
     }
 

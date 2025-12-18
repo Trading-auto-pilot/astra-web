@@ -15,13 +15,14 @@ import {
   fetchFmpKeyMetricsTtm,
   fetchFmpRatios,
   fetchFmpRatiosTtm,
+  fetchGlossary,
   type FundamentalRecord,
 } from "../../api/fundamentals";
 import SectionHeader from "../molecules/content/SectionHeader";
 import ReactApexChart from "react-apexcharts";
 import ReactCountryFlag from "react-country-flag";
 import TickerDetailTab, { type MomentumComponents } from "./tickers/TickerDetailTab";
-import TickerStatementTab from "./tickers/TickerStatementTab";
+import TickerStatementTab, { type GlossaryDoc } from "./tickers/TickerStatementTab";
 import TickerRatiosTab from "./tickers/TickerRatiosTab";
 import TickerAnalysisTab from "./tickers/TickerAnalysisTab";
 import TickerFinancialReportTab from "./tickers/TickerFinancialReportTab";
@@ -144,6 +145,22 @@ export function TickersPage() {
     balance: { docs: [], status: "idle" },
     cash: { docs: [], status: "idle" },
   });
+  const [glossaryState, setGlossaryState] = useState<Record<
+    string,
+    { doc: GlossaryDoc | null; status: "idle" | "loading" | "error"; error?: string }
+  >>({
+    income: { doc: null, status: "idle" },
+    balance: { doc: null, status: "idle" },
+    cash: { doc: null, status: "idle" },
+    keyMetrics: { doc: null, status: "idle" },
+    ratios: { doc: null, status: "idle" },
+    keyMetricsTtm: { doc: null, status: "idle" },
+    ratiosTtm: { doc: null, status: "idle" },
+    financial: { doc: null, status: "idle" },
+    ownerEarnings: { doc: null, status: "idle" },
+    enterpriseValues: { doc: null, status: "idle" },
+  });
+
   const [ratiosTab, setRatiosTab] = useState<"keyMetrics" | "ratios" | "keyMetricsTtm" | "ratiosTtm">("keyMetrics");
   const [ratiosData, setRatiosData] = useState<Record<string, { docs: any[]; status: StatementStatus }>>({
     keyMetrics: { docs: [], status: "idle" },
@@ -529,6 +546,95 @@ export function TickersPage() {
       };
     });
   }, [selectedSymbol, env.fmpApiKey]);
+
+  const ensureGlossary = (key: string, fileName: string) => {
+    setGlossaryState((prev) => {
+      const current = prev[key];
+      if (current && current.status === "loading") return prev;
+      if (current && current.status === "idle" && current.doc) return prev;
+      if (current && current.status === "error" && current.doc) return prev;
+      return {
+        ...prev,
+        [key]: { ...(current || {}), status: "loading", error: undefined },
+      };
+    });
+
+    const controller = new AbortController();
+    fetchGlossary(fileName, controller.signal)
+      .then((doc) => {
+        setGlossaryState((prev) => ({
+          ...prev,
+          [key]: { doc, status: "idle" },
+        }));
+      })
+      .catch((err: any) => {
+        setGlossaryState((prev) => ({
+          ...prev,
+          [key]: { doc: null, status: "error", error: err?.message || "Unable to load glossary" },
+        }));
+      });
+
+    return () => controller.abort();
+  };
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+
+    const mapStatement: Record<string, string> = {
+      income: "income-statement.json",
+      balance: "balance-sheet-statement.json",
+      cash: "cash-flow-statement.json",
+    };
+
+    const mapRatios: Record<string, string> = {
+      keyMetrics: "key-metrics.json",
+      ratios: "ratios.json",
+      keyMetricsTtm: "key-metrics-ttm.json",
+      ratiosTtm: "ratios-ttm.json",
+    };
+
+    const mapScore: Record<string, string> = {
+      financial: "financial-scores.json",
+      ownerEarnings: "owner-earnings.json",
+      enterpriseValues: "enterprise-values.json",
+    };
+
+    const tasks: Array<() => void> = [];
+
+    if (infoTab === "statement") {
+      const file = mapStatement[statementTab];
+      if (file) {
+        const cleanup = ensureGlossary(statementTab, file);
+        if (cleanup) tasks.push(cleanup);
+      }
+    }
+
+    if (infoTab === "ratios") {
+      const file = mapRatios[ratiosTab];
+      if (file) {
+        const cleanup = ensureGlossary(ratiosTab, file);
+        if (cleanup) tasks.push(cleanup);
+      }
+    }
+
+    if (infoTab === "score") {
+      const file = mapScore[scoreTab];
+      if (file) {
+        const cleanup = ensureGlossary(scoreTab, file);
+        if (cleanup) tasks.push(cleanup);
+      }
+    }
+
+    return () => {
+      tasks.forEach((fn) => {
+        try {
+          fn();
+        } catch {
+          // ignore
+        }
+      });
+    };
+  }, [infoTab, statementTab, ratiosTab, scoreTab, selectedSymbol]);
 
   const industryOptions = useMemo(() => {
     const set = new Set<string>();
@@ -1319,13 +1425,13 @@ export function TickersPage() {
                 </div>
 
                 {statementTab === "income" && (
-                  <TickerStatementTab metrics={incomeMetrics} status={statementData.income?.status ?? "idle"} />
+                  <TickerStatementTab metrics={incomeMetrics} status={statementData.income?.status ?? "idle"} glossary={glossaryState.income?.doc} />
                 )}
                 {statementTab === "balance" && (
-                  <TickerStatementTab metrics={balanceMetrics} status={statementData.balance?.status ?? "idle"} />
+                  <TickerStatementTab metrics={balanceMetrics} status={statementData.balance?.status ?? "idle"} glossary={glossaryState.balance?.doc} />
                 )}
                 {statementTab === "cash" && (
-                  <TickerStatementTab metrics={cashMetrics} status={statementData.cash?.status ?? "idle"} />
+                  <TickerStatementTab metrics={cashMetrics} status={statementData.cash?.status ?? "idle"} glossary={glossaryState.cash?.doc} />
                 )}
               </div>
             )}
@@ -1356,7 +1462,7 @@ export function TickersPage() {
                   })}
                 </div>
 
-                <TickerRatiosTab metrics={ratioMetrics[ratiosTab]} status={ratiosData[ratiosTab]?.status ?? "idle"} />
+                <TickerRatiosTab metrics={ratioMetrics[ratiosTab]} status={ratiosData[ratiosTab]?.status ?? "idle"} glossary={glossaryState[ratiosTab]?.doc} />
               </div>
             )}
 
@@ -1369,10 +1475,13 @@ export function TickersPage() {
                 piotroskiValue={piotroskiValue}
                 scoreCurrency={scoreCurrency}
                 scoreTableRows={scoreTableRows}
+                financialGlossary={glossaryState.financial?.doc}
                 ownerMetrics={ownerMetrics}
                 ownerStatus={ownerData.status}
+                ownerGlossary={glossaryState.ownerEarnings?.doc}
                 enterpriseMetrics={enterpriseMetrics}
                 enterpriseStatus={enterpriseData.status}
+                enterpriseGlossary={glossaryState.enterpriseValues?.doc}
               />
             )}
 
