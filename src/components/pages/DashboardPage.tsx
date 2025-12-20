@@ -10,6 +10,8 @@ import UsersPage from "./UsersPage";
 import SchedulerPage from "./SchedulerPage";
 import ApiKeysPage from "./ApiKeysPage";
 import TickerScannerAdminPage from "./TickerScannerAdminPage";
+import AdminMicroservicePage from "./AdminMicroservicePage";
+import AdminMicroserviceDetailPage from "./AdminMicroserviceDetailPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
@@ -33,7 +35,7 @@ export type DashboardPageProps = {
   extraContent?: ReactNode;
 };
 
-type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys" | "tickerScanner";
+type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys" | "tickerScanner" | "microservice";
 
 const getAppSection = (): AppSection => {
   if (typeof window === "undefined") return "overview";
@@ -52,6 +54,7 @@ const getAppSection = (): AppSection => {
     if (parts[1] === "scheduler") return "scheduler";
     if (parts[1] === "api_key") return "apiKeys";
     if (parts[1] === "ticker_scanner") return "tickerScanner";
+    if (parts[1] === "microservice") return "microservice";
     return "overview";
   }
 
@@ -104,6 +107,18 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <TickerScannerAdminPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "microservice") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        {typeof window !== "undefined" && window.location.hash.includes("/admin/microservice/") ? (
+          <AdminMicroserviceDetailPage />
+        ) : (
+          <AdminMicroservicePage />
+        )}
       </DashboardLayout>
     );
   }

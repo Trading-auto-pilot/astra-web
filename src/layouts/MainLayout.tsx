@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import Logo from "../components/atoms/media/Logo";
 import UserMenu from "../components/molecules/navigation/UserMenu";
 import { useRelease } from "../hooks/useReleaseInfo";
+import BaseButton from "../components/atoms/base/buttons/BaseButton";
 
 export type MainLayoutProps = {
   children: ReactNode;
@@ -56,14 +57,16 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     }
 
     if (page === "admin/*" || page === "admin") {
-      ["users", "api_key", "scheduler", "ticker_scanner"].forEach((segment) => {
+      ["users", "api_key", "scheduler", "ticker_scanner", "microservice"].forEach((segment) => {
         const href = `#/admin/${segment}`;
         const label =
           segment === "api_key"
             ? "API Key"
             : segment === "ticker_scanner"
               ? "Tickers Scanner"
-              : formatLabel(segment);
+              : segment === "microservice"
+                ? "Microservice"
+                : formatLabel(segment);
         if (!adminChildren.some((child) => child.href === href)) {
           adminChildren.push({ label, href });
         }
@@ -80,7 +83,9 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
           ? "API Key"
           : segment === "ticker_scanner"
             ? "Tickers Scanner"
-            : formatLabel(segment);
+            : segment === "microservice"
+              ? "Microservice"
+              : formatLabel(segment);
       if (!adminChildren.some((child) => child.href === href)) {
         adminChildren.push({ label, href });
       }
@@ -93,7 +98,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
   }
 
   if (adminChildren.length) {
-    const order = { users: 0, api_key: 1, scheduler: 2, ticker_scanner: 3 } as Record<string, number>;
+    const order = { users: 0, api_key: 1, scheduler: 2, ticker_scanner: 3, microservice: 4 } as Record<string, number>;
     adminChildren.sort((a, b) => {
       const aKey = String(a.href || "").replace(/^#\/admin\//, "");
       const bKey = String(b.href || "").replace(/^#\/admin\//, "");
@@ -118,6 +123,7 @@ export function MainLayout({
   const navLinks = buildNavLinks(navEntries);
   const currentHash = typeof window !== "undefined" ? window.location.hash || "#/overview" : "#/overview";
   const [openNav, setOpenNav] = useState(false);
+  const [showReleaseModal, setShowReleaseModal] = useState(false);
 
   const closeNav = () => setOpenNav(false);
 
@@ -138,9 +144,6 @@ export function MainLayout({
           >
             ✕
           </button>
-        </div>
-        <div className="mt-3 flex items-center justify-end text-xs text-slate-400">
-          <span>versione {(release as any)?.version ?? "-"}</span>
         </div>
         <nav className="mt-6 space-y-2 text-sm text-slate-700">
           {navLinks.map((link) => {
@@ -216,8 +219,55 @@ export function MainLayout({
           </div>
           <UserMenu userName={userName} />
         </header>
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 pb-16">{children}</main>
+        <footer className="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between border-t border-slate-200 bg-white/90 px-3 py-2 text-[11px] text-slate-600 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-slate-700">Status</span>
+            <span>App ready</span>
+          </div>
+          <div className="flex items-center gap-3 text-slate-500">
+            <button
+              type="button"
+              className="rounded px-2 py-1 transition hover:bg-slate-100"
+              onClick={() => setShowReleaseModal(true)}
+            >
+              Versione {release?.version ?? "-"}
+            </button>
+            {release?.lastUpdate ? <span>Last update {release.lastUpdate}</span> : null}
+          </div>
+        </footer>
       </div>
+
+      {showReleaseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <div className="text-base font-semibold text-slate-900">Release info</div>
+                <div className="text-[11px] text-slate-500">
+                  {release?.version ? `v${release.version}` : "versione non disponibile"}
+                  {release?.lastUpdate ? ` · ${release.lastUpdate}` : ""}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <BaseButton
+                  variant="outline"
+                  color="neutral"
+                  size="sm"
+                  onClick={() => setShowReleaseModal(false)}
+                >
+                  Chiudi
+                </BaseButton>
+              </div>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-4 py-3 text-[11px] text-slate-700">
+              <pre className="rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-800">
+                {JSON.stringify(release, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
