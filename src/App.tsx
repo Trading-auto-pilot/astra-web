@@ -68,6 +68,7 @@ const getPermissionKeyFromHash = (hash: string): string => {
     if (section === "scheduler") return "admin/scheduler";
     if (section === "api_key") return "admin/api_key";
     if (section === "ticker_scanner") return "admin/ticker_scanner";
+    if (section === "microservice") return "admin/microservice";
     return "admin";
   }
 
@@ -94,6 +95,7 @@ const normalizeClientNavPage = (page: string): string => {
   if (cleaned === "admin/scheduler") return "admin/scheduler";
   if (cleaned === "admin/api_key") return "admin/api_key";
   if (cleaned === "admin/ticker_scanner") return "admin/ticker_scanner";
+  if (cleaned === "admin/microservice") return "admin/microservice";
 
   // Small backward-compatible fallbacks
   if (cleaned === "tickers") return "dashboard/tickers";
@@ -120,6 +122,7 @@ const normalizeAllowedPages = (rawPages: string[]): string[] => {
     if (!expanded.includes("admin/scheduler")) expanded.push("admin/scheduler");
     if (!expanded.includes("admin/api_key")) expanded.push("admin/api_key");
     if (!expanded.includes("admin/ticker_scanner")) expanded.push("admin/ticker_scanner");
+    if (!expanded.includes("admin/microservice")) expanded.push("admin/microservice");
   }
 
   // Always allow Overview as safe fallback.
