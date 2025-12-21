@@ -88,7 +88,7 @@ const getNodeBytes = (node: any): number => {
   if (!node) return 0;
   if (typeof node.size === "number") return node.size;
   if (typeof node.totalBytes === "number") return node.totalBytes;
-  if (Array.isArray(node.files)) return node.files.reduce((sum, f) => sum + getNodeBytes(f), 0);
+  if (Array.isArray(node.files)) return node.files.reduce((sum: number, f: any) => sum + getNodeBytes(f), 0);
   return 0;
 };
 
@@ -342,7 +342,7 @@ export default function AdminMicroserviceDetailPage() {
       return;
     }
     if (!l2Letter || !letters.includes(l2Letter)) {
-      setL2Letter(letters[0]);
+      setL2Letter((letters[0] as string) || null);
     }
   }, [l2Size, l2Letter]);
 
@@ -1121,7 +1121,7 @@ export default function AdminMicroserviceDetailPage() {
             <div className="rounded-md border border-slate-200 bg-white">
               {(() => {
                 const rawEntries = Array.isArray(l2Size?.tree?.files) ? l2Size.tree.files : [];
-                const entries = rawEntries
+                const entries: { name: string; data: any }[] = rawEntries
                   .filter((e: any) => {
                     const p = String(e?.path || "").toLowerCase();
                     return p && !p.endsWith(".ds_store");
@@ -1133,10 +1133,10 @@ export default function AdminMicroserviceDetailPage() {
                         : `item-${idx}`;
                     return { name, data: entry };
                   })
-                  .sort((a, b) => a.name.localeCompare(b.name));
+                  .sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name));
 
-                const letters = Array.from(
-                  new Set(entries.map((e) => (e.name[0] ? e.name[0].toUpperCase() : "")).filter(Boolean))
+                const letters: string[] = Array.from(
+                  new Set(entries.map((e: { name: string }) => (e.name[0] ? e.name[0].toUpperCase() : "")).filter(Boolean))
                 ).sort();
                 const useFilter = entries.length > 20;
                 const activeLetter =
@@ -1152,17 +1152,19 @@ export default function AdminMicroserviceDetailPage() {
                 const filtered =
                   useFilter && activeLetter
                     ? entries.filter(
-                        (e) =>
+                        (e: { name: string }) =>
                           e.name.toUpperCase().startsWith(activeLetter) &&
                           (!normalizedSearch || e.name.toUpperCase().includes(normalizedSearch))
                       )
-                    : entries.filter((e) => !normalizedSearch || e.name.toUpperCase().includes(normalizedSearch));
+                    : entries.filter(
+                        (e: { name: string }) => !normalizedSearch || e.name.toUpperCase().includes(normalizedSearch)
+                      );
 
                 const totalFromRoot = typeof l2Size?.totalBytes === "number" ? l2Size.totalBytes : 0;
                 const sumChildren =
                   totalFromRoot > 0
                     ? totalFromRoot
-                    : entries.reduce((sum: number, e: any) => sum + getNodeBytes(e.data), 0);
+                    : entries.reduce((sum: number, e: { data: any }) => sum + getNodeBytes(e.data), 0);
 
                 return (
                   <>
@@ -1191,7 +1193,7 @@ export default function AdminMicroserviceDetailPage() {
                             placeholder="Cerca symbol"
                             className="w-40 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
                             value={l2Search}
-                            onChange={(e) => setL2Search(e.target.value)}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setL2Search(e.target.value)}
                           />
                           <datalist id="l2-symbols">
                             {entries.map((e) => (
