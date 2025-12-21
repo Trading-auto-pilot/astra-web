@@ -1,26 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  fetchCacheDbLoggerStatus,
-  fetchCacheLogLevel,
-  fetchCacheReleaseInfo,
-  fetchCacheSettings,
-  fetchCacheHealth,
-  reloadCacheSettings,
-  updateCacheSetting,
-  fetchCacheCommunicationChannels,
-  updateCacheCommunicationChannels,
-  fetchServiceFlags,
-  setCacheLogLevel,
-  setCacheDbLoggerStatus,
-  updateServiceFlag,
-  type ServiceFlag,
-} from "../../api/serviceFlags";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchServiceFlags, updateServiceFlag, type ServiceFlag } from "../../api/serviceFlags";
 import SectionHeader from "../molecules/content/SectionHeader";
 import BaseButton from "../atoms/base/buttons/BaseButton";
 import AppIcon from "../atoms/icon/AppIcon";
-import MicroserviceLogsCard from "../molecules/microservice/MicroserviceLogsCard";
+import MicroserviceGeneralTab from "../molecules/microservice/MicroserviceGeneralTab";
+import TickerScannerAdminPage from "./TickerScannerAdminPage";
+import ReactApexChart from "react-apexcharts";
+import { env } from "../../config/env";
 
 type Status = "idle" | "loading" | "error";
+type L3Target =
+  | { type: "all" }
+  | { type: "symbol"; symbol: string }
+  | { type: "file"; symbol: string; tf: string };
 
 type ReleaseInfo = {
   version?: string | null;
@@ -72,6 +64,34 @@ const formatUptime = (value?: number | string) => {
   return parts.join(" ");
 };
 
+const formatBytes = (bytes?: number) => {
+  if (!bytes || bytes < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let idx = 0;
+  let val = bytes;
+  while (val >= 1024 && idx < units.length - 1) {
+    val /= 1024;
+    idx += 1;
+  }
+  return `${val.toFixed(val >= 10 ? 0 : 1)} ${units[idx]}`;
+};
+
+const progressColor = (percent: number) => {
+  if (percent >= 85) return "bg-red-500";
+  if (percent >= 75) return "bg-amber-600";
+  if (percent >= 65) return "bg-amber-400";
+  if (percent >= 50) return "bg-yellow-400";
+  return "bg-emerald-500";
+};
+
+const getNodeBytes = (node: any): number => {
+  if (!node) return 0;
+  if (typeof node.size === "number") return node.size;
+  if (typeof node.totalBytes === "number") return node.totalBytes;
+  if (Array.isArray(node.files)) return node.files.reduce((sum, f) => sum + getNodeBytes(f), 0);
+  return 0;
+};
+
 type AlertProps = {
   message: string;
   tone?: "error" | "warn" | "success";
@@ -104,18 +124,11 @@ const Alert = ({ message, tone = "error", onClose }: AlertProps) => {
   );
 };
 
-type ChannelUiState = {
-  on: boolean;
-  intervalsMs: string;
-};
-
 type HealthInfo = {
   status?: string;
   uptime?: number | string;
   [key: string]: any;
 };
-
-const channelOrder = ["telemetry", "metrics", "data", "logs"];
 
 export default function AdminMicroserviceDetailPage() {
   const [rows, setRows] = useState<ServiceFlag[]>([]);
@@ -123,41 +136,38 @@ export default function AdminMicroserviceDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<number | string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const [dbLogger, setDbLogger] = useState<boolean | null>(null);
-  const [dbLoggerStatus, setDbLoggerStatus] = useState<Status>("idle");
-  const [dbLoggerError, setDbLoggerError] = useState<string | null>(null);
-  const [logLevel, setLogLevel] = useState<string | null>(null);
-  const [logLevelStatus, setLogLevelStatus] = useState<Status>("idle");
-  const [logLevelError, setLogLevelError] = useState<string | null>(null);
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
-  const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
-  const [settingsStatus, setSettingsStatus] = useState<Status>("idle");
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [editableSettings, setEditableSettings] = useState<Record<string, string>>({});
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [saveSettingsError, setSaveSettingsError] = useState<string | null>(null);
-  const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
-  const [communicationChannels, setCommunicationChannels] = useState<Record<string, ChannelUiState>>({});
-  const [communicationOriginal, setCommunicationOriginal] = useState<Record<string, ChannelUiState>>({});
-  const [communicationStatus, setCommunicationStatus] = useState<Status>("idle");
-  const [communicationError, setCommunicationError] = useState<string | null>(null);
-  const [communicationSuccess, setCommunicationSuccess] = useState<string | null>(null);
-  const [communicationSaving, setCommunicationSaving] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
+  const [microserviceName, setMicroserviceName] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"general" | "specific" | "cache" | "l2">("general");
+  const [candleSymbol, setCandleSymbol] = useState("");
+  const [candleStart, setCandleStart] = useState("");
+  const [candleEnd, setCandleEnd] = useState("");
+  const [candleTf, setCandleTf] = useState("1d");
+  const [candleStatus, setCandleStatus] = useState<Status>("idle");
+  const [candleError, setCandleError] = useState<string | null>(null);
+  const [candleRows, setCandleRows] = useState<any[]>([]);
+  const [candleTab, setCandleTab] = useState<"table" | "chart">("table");
+  const [provider, setProvider] = useState<"FMP" | "ALPACA" | "">("");
+  const [providerStatus, setProviderStatus] = useState<Status>("idle");
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [l3Size, setL3Size] = useState<any>(null);
+  const [l3Status, setL3Status] = useState<Status>("idle");
+  const [l3Error, setL3Error] = useState<string | null>(null);
+  const [showL3Confirm, setShowL3Confirm] = useState(false);
+  const [l3DeleteTarget, setL3DeleteTarget] = useState<L3Target | null>(null);
+  const [l3Expanded, setL3Expanded] = useState<Record<string, boolean>>({});
+  const [l2Size, setL2Size] = useState<any>(null);
+  const [l2Status, setL2Status] = useState<Status>("idle");
+  const [l2Error, setL2Error] = useState<string | null>(null);
+  const [l2Expanded, setL2Expanded] = useState<Record<string, boolean>>({});
+  const [l2Letter, setL2Letter] = useState<string | null>(null);
+  const [l2Search, setL2Search] = useState<string>("");
+  const [showL2Confirm, setShowL2Confirm] = useState(false);
+  const [l2DeleteTarget, setL2DeleteTarget] = useState<L3Target | null>(null);
 
   const slug = useMemo(() => getSlugFromHash(), []);
-
-  const normalizeChannels = useCallback((input: Record<string, any>) => {
-    const result: Record<string, ChannelUiState> = {};
-    Object.entries(input || {}).forEach(([key, value]) => {
-      const on = !!(value as any)?.on;
-      const msVal = (value as any)?.params?.intervalsMs;
-      result[key] = { on, intervalsMs: msVal !== undefined && msVal !== null ? String(msVal) : "" };
-    });
-    return result;
-  }, []);
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -177,71 +187,10 @@ export default function AdminMicroserviceDetailPage() {
   }, [load]);
 
   useEffect(() => {
-    if (!slug || slug.toLowerCase() !== "cachemanager") return;
-    setDbLoggerStatus("loading");
-    setDbLoggerError(null);
-    fetchCacheDbLoggerStatus()
-      .then((enabled) => {
-        setDbLogger(enabled);
-        setDbLoggerStatus("idle");
-      })
-      .catch((err: any) => {
-        setDbLoggerError(err?.message || "Errore nel leggere dbLogger");
-        setDbLoggerStatus("error");
-      });
-
-    setLogLevelStatus("loading");
-    setLogLevelError(null);
-    fetchCacheLogLevel()
-      .then((lvl) => {
-        setLogLevel(lvl);
-        setLogLevelStatus("idle");
-      })
-      .catch((err: any) => {
-        setLogLevelError(err?.message || "Errore nel leggere log level");
-        setLogLevelStatus("error");
-      });
-
-    fetchCacheReleaseInfo()
-      .then((info) => setRelease(info))
-      .catch(() => setRelease(null));
-
-    fetchCacheHealth()
-      .then((data) => setHealth(data as any))
-      .catch(() => setHealth(null));
-
-    setSettingsStatus("loading");
-    setSettingsError(null);
-    setSettingsSuccess(null);
-    fetchCacheSettings()
-      .then((data) => {
-        setSettings(data);
-        const obj: Record<string, string> = {};
-        Object.entries(data || {}).forEach(([k, v]) => {
-          obj[k] = v != null ? String(v) : "";
-        });
-        setEditableSettings(obj);
-        setSettingsStatus("idle");
-      })
-      .catch((err: any) => {
-        setSettingsError(err?.message || "Errore nel leggere i settings");
-        setSettingsStatus("error");
-      });
-    setCommunicationStatus("loading");
-    setCommunicationError(null);
-    setCommunicationSuccess(null);
-    fetchCacheCommunicationChannels()
-      .then((data) => {
-        const normalized = normalizeChannels(data);
-        setCommunicationChannels(normalized);
-        setCommunicationOriginal(normalized);
-        setCommunicationStatus("idle");
-      })
-      .catch((err: any) => {
-        setCommunicationError(err?.message || "Errore nel leggere i communication channels");
-        setCommunicationStatus("error");
-      });
-  }, [slug, normalizeChannels]);
+    if (!slug) return;
+    setMicroserviceName(slug.toLowerCase());
+    setActiveTab("general");
+  }, [slug]);
 
   const filtered = useMemo(() => {
     if (!slug) return [];
@@ -276,118 +225,11 @@ export default function AdminMicroserviceDetailPage() {
     [rows]
   );
 
-  const handleSaveChannels = useCallback(async () => {
-    setCommunicationError(null);
-    setCommunicationSuccess(null);
-
-    const getSafeMs = (key: string, value: ChannelUiState | undefined, prev: ChannelUiState | undefined) => {
-      const raw = value?.intervalsMs ?? prev?.intervalsMs ?? "";
-      const parsed = parseInt(String(raw), 10);
-      if (Number.isInteger(parsed) && parsed > 0) return parsed;
-      const prevParsed = parseInt(String(prev?.intervalsMs ?? ""), 10);
-      if (Number.isInteger(prevParsed) && prevParsed > 0) return prevParsed;
-      return 1000; // fallback di sicurezza
-    };
-
-    // verifica se almeno un intervalsMs è cambiato
-    const changes: Record<string, ChannelUiState> = {};
-    Object.entries(communicationChannels || {}).forEach(([key, value]) => {
-      const prev = communicationOriginal[key];
-      const currentMs = value.intervalsMs || prev?.intervalsMs || "";
-      const prevMs = prev?.intervalsMs || "";
-      // Salviamo solo variazioni sui parametri (intervalsMs). Lo switch viene salvato immediatamente.
-      if (!prev || currentMs !== prevMs) {
-        changes[key] = { ...value, intervalsMs: currentMs };
-      }
-    });
-
-    if (Object.keys(changes).length === 0) {
-      setCommunicationSuccess("Nessuna modifica da salvare");
-      return;
-    }
-
-    const fullPayload: Record<string, { on: boolean; params: { intervalsMs: number } }> = {};
-    for (const [key, value] of Object.entries(communicationChannels || {})) {
-      const prev = communicationOriginal[key];
-      const safeMs = getSafeMs(key, value, prev);
-      fullPayload[key] = { on: !!value.on, params: { intervalsMs: safeMs } };
-    }
-
-    setCommunicationSaving(true);
-    try {
-      // inviamo l'intera configurazione corrente
-      const updated = await updateCacheCommunicationChannels(fullPayload);
-      const latest = normalizeChannels({ ...(communicationChannels || {}), ...(updated || {}) });
-      setCommunicationChannels(latest);
-      setCommunicationOriginal(latest);
-      setCommunicationSuccess("Canali aggiornati");
-    } catch (err: any) {
-      setCommunicationError(err?.message || "Errore salvando i communication channels");
-    } finally {
-      setCommunicationSaving(false);
-    }
-  }, [communicationChannels, communicationOriginal, normalizeChannels]);
-
-  const handleToggleChannel = useCallback(
-    async (key: string) => {
-      const current = communicationChannels[key];
-      if (!current) return;
-      const prevOn = !!current.on;
-      const nextOn = !prevOn;
-
-      const getSafeMs = (value: ChannelUiState | undefined, prev: ChannelUiState | undefined) => {
-        const raw = value?.intervalsMs ?? prev?.intervalsMs ?? "";
-        const parsed = parseInt(String(raw), 10);
-        if (Number.isInteger(parsed) && parsed > 0) return parsed;
-        const prevParsed = parseInt(String(prev?.intervalsMs ?? ""), 10);
-        if (Number.isInteger(prevParsed) && prevParsed > 0) return prevParsed;
-        return 1000;
-      };
-      const parsed = getSafeMs(current, communicationOriginal[key]);
-
-      setCommunicationError(null);
-      setCommunicationSuccess(null);
-      // aggiorna subito lo stato locale
-      setCommunicationChannels((prev) => ({
-        ...prev,
-        [key]: { ...(prev[key] || { intervalsMs: "" }), on: nextOn },
-      }));
-
-      setCommunicationSaving(true);
-      try {
-        // payload completo di tutti i canali correnti (incluso quello appena togglato)
-        const payload: Record<string, { on: boolean; params: { intervalsMs: number } }> = {};
-        const snapshot = {
-          ...communicationChannels,
-          [key]: { ...current, on: nextOn, intervalsMs: String(parsed) || communicationOriginal[key]?.intervalsMs || "" },
-        };
-        for (const [chKey, value] of Object.entries(snapshot)) {
-          const msVal = getSafeMs(value, communicationOriginal[chKey]);
-          payload[chKey] = { on: !!value.on, params: { intervalsMs: msVal } };
-        }
-
-        const updated = await updateCacheCommunicationChannels(payload);
-        const normalized = normalizeChannels({ ...(communicationOriginal || {}), ...(updated || {}) });
-        setCommunicationChannels(normalized);
-        setCommunicationOriginal(normalized);
-        setCommunicationSuccess(`Canale ${key} aggiornato`);
-      } catch (err: any) {
-        // rollback
-        setCommunicationChannels((prev) => ({
-          ...prev,
-          [key]: { ...(prev[key] || { intervalsMs: "" }), on: prevOn },
-        }));
-        setCommunicationError(err?.message || `Errore aggiornando il canale ${key}`);
-      } finally {
-        setCommunicationSaving(false);
-      }
-    },
-    [communicationChannels, communicationOriginal, normalizeChannels]
-  );
-
-  const heading = slug || "Microservice";
+  const heading = slug || microserviceName || "Microservice";
   const subtitle = filtered[0]?.note || "";
   const isCachemanager = slug?.toLowerCase() === "cachemanager";
+  const isScheduler = slug?.toLowerCase() === "scheduler";
+  const isTickerScanner = slug?.toLowerCase() === "tickerscanner";
   const releaseTitle = release?.microservice || heading;
   const healthStatus = health?.status ? `Status: ${health.status}` : "";
   const healthUptime = health?.uptime !== undefined ? `Uptime: ${formatUptime(health.uptime)}` : "";
@@ -398,6 +240,111 @@ export default function AdminMicroserviceDetailPage() {
   if (release?.lastUpdate) releaseMetaParts.push(release.lastUpdate);
   if (healthMeta) releaseMetaParts.push(healthMeta);
   const releaseMeta = releaseMetaParts.join(" · ");
+
+  // load provider on cachemanager tab
+  useEffect(() => {
+    if (!isCachemanager) return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setProviderStatus("loading");
+    fetch(`${env.apiBaseUrl}/cachemanager/provider`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore provider");
+        const p = (data?.provider || "").toUpperCase();
+        if (p === "FMP" || p === "ALPACA") setProvider(p);
+        setProviderStatus("idle");
+      })
+      .catch((err) => {
+        setProviderStatus("error");
+        setProviderError(err?.message || "Errore nel recupero provider");
+      });
+  }, [isCachemanager]);
+
+  // reset tab to general when microservice changes
+  useEffect(() => {
+    setActiveTab("general");
+  }, [microserviceName]);
+
+  // load L3 size on landing (cachemanager only)
+  useEffect(() => {
+    if (!isCachemanager) return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setL3Status("loading");
+    fetch(`${env.apiBaseUrl}/cachemanager/status/L3/size`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore L3 size");
+        setL3Size(data.data || data);
+        setL3Status("idle");
+      })
+      .catch((err) => {
+        setL3Status("error");
+        setL3Error(err?.message || "Errore nel recupero L3 size");
+      });
+  }, [isCachemanager]);
+
+  // load L2 size when the tab is opened (only cachemanager)
+  useEffect(() => {
+    if (!isCachemanager || activeTab !== "l2") return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setL2Status("loading");
+    fetch(`${env.apiBaseUrl}/cachemanager/status/L2/size`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore L2 size");
+        setL2Size(data.data || data);
+        setL2Status("idle");
+      })
+      .catch((err) => {
+        setL2Status("error");
+        setL2Error(err?.message || "Errore nel recupero L2 size");
+      });
+  }, [activeTab, isCachemanager]);
+
+  // mantiene la lettera selezionata coerente con le entry disponibili
+  useEffect(() => {
+    const rawEntries = Array.isArray(l2Size?.tree?.files) ? l2Size.tree.files : [];
+    const entries = rawEntries.filter((e: any) => {
+      const p = String(e?.path || "").toLowerCase();
+      return p && !p.endsWith(".ds_store");
+    });
+    const letters = Array.from(
+      new Set(
+        entries
+          .map((e: any) => {
+            const name =
+              typeof e?.path === "string" ? e.path.split(/[/\\]/).filter(Boolean).pop() || e.path : "";
+            return name ? name[0]?.toUpperCase() : "";
+          })
+          .filter(Boolean)
+      )
+    ).sort();
+    if (!letters.length) {
+      setL2Letter(null);
+      return;
+    }
+    if (!l2Letter || !letters.includes(l2Letter)) {
+      setL2Letter(letters[0]);
+    }
+  }, [l2Size, l2Letter]);
 
   return (
     <div className="space-y-4">
@@ -421,46 +368,6 @@ export default function AdminMicroserviceDetailPage() {
               }}
             >
               Back
-            </BaseButton>
-            {isCachemanager && (
-              <BaseButton
-                variant="outline"
-                color="neutral"
-                size="sm"
-                startIcon={<AppIcon icon="mdi:database-settings" />}
-                onClick={() => {
-                  setShowSettingsModal(true);
-                  setSettingsStatus("loading");
-                  setSettingsError(null);
-                  setSettingsSuccess(null);
-                  fetchCacheSettings()
-                    .then((data) => {
-                      setSettings(data);
-                      const obj: Record<string, string> = {};
-                      Object.entries(data || {}).forEach(([k, v]) => {
-                        obj[k] = v != null ? String(v) : "";
-                      });
-                      setEditableSettings(obj);
-                      setSettingsStatus("idle");
-                    })
-                    .catch((err: any) => {
-                      setSettingsError(err?.message || "Errore nel leggere i settings");
-                      setSettingsStatus("error");
-                    });
-                }}
-              >
-                DB Settings
-              </BaseButton>
-            )}
-            <BaseButton
-              variant="outline"
-              color="neutral"
-              size="sm"
-              startIcon={<AppIcon icon="mdi:information-outline" />}
-              onClick={() => setShowReleaseModal(true)}
-              disabled={!release}
-            >
-              Release info
             </BaseButton>
           </div>
         }
@@ -492,7 +399,7 @@ export default function AdminMicroserviceDetailPage() {
         </div>
       )}
 
-      {filtered.length > 0 && !isCachemanager && (
+      {filtered.length > 0 && !isCachemanager && !isScheduler && !isTickerScanner && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-xs">
             <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -541,234 +448,881 @@ export default function AdminMicroserviceDetailPage() {
         </div>
       )}
 
-      {filtered.length > 0 && isCachemanager && (
-        <div className="mt-2 grid gap-3 md:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-700">
-            <table className="min-w-[200px] text-[11px] text-slate-700">
-              <tbody>
-                <tr>
-                  <td className="pr-3 font-semibold text-slate-600">Service Enabled</td>
-                  <td className="py-1">
-                    <label className="inline-flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="peer sr-only"
-                        checked={!!filtered[0].enabled}
-                        disabled={updatingId === filtered[0].id}
-                        onChange={() => toggleEnabled(filtered[0])}
-                      />
-                      <span
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                          filtered[0].enabled ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
-                        } ${updatingId === filtered[0].id ? "opacity-70" : ""}`}
-                      >
-                        <span
-                          className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                            filtered[0].enabled ? "translate-x-4" : "translate-x-0.5"
-                          }`}
-                        />
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-700">
-                        {filtered[0].enabled ? "On" : "Off"}
-                      </span>
-                    </label>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Abilita o disabilita il profilo del microservizio: il processo automatico lo avvia o lo esclude.
-                    </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td className="pr-3 font-semibold text-slate-600">DB Logger</td>
-                  <td className="py-1">
-                    <label className="inline-flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="peer sr-only"
-                        checked={!!dbLogger}
-                        disabled={dbLoggerStatus === "loading"}
-                        onChange={async () => {
-                          const next = !dbLogger;
-                          setDbLogger(next);
-                          setDbLoggerError(null);
-                          setDbLoggerStatus("loading");
-                          try {
-                            await setCacheDbLoggerStatus(next);
-                            setDbLoggerStatus("idle");
-                          } catch (err: any) {
-                            setDbLoggerError(err?.message || "Errore aggiornando dbLogger");
-                            setDbLoggerStatus("error");
-                          }
+      {filtered.length > 0 && (isCachemanager || isScheduler || isTickerScanner) && (
+        <div className="flex items-center gap-2 border-b border-slate-200">
+          <button
+            className={`px-3 py-2 text-[11px] font-semibold ${
+              activeTab === "general" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+            }`}
+            onClick={() => setActiveTab("general")}
+          >
+            General settings
+          </button>
+          {isCachemanager && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "specific" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("specific")}
+            >
+              Candles
+            </button>
+          )}
+          {isCachemanager && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "cache" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("cache")}
+            >
+              L3 Cache (REDIS)
+            </button>
+          )}
+          {isCachemanager && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "l2" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("l2")}
+            >
+              L2 Cache (File system)
+            </button>
+          )}
+          {isTickerScanner && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "specific" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("specific")}
+            >
+              Specific settings
+            </button>
+          )}
+        </div>
+      )}
+
+      {filtered.length > 0 && activeTab === "general" && (
+        <MicroserviceGeneralTab
+          microservice={microserviceName || slug || ""}
+          onReleaseChange={setRelease}
+          onHealthChange={setHealth}
+          onOpenReleaseModal={() => setShowReleaseModal(true)}
+        />
+      )}
+
+      {filtered.length > 0 && activeTab === "specific" && isCachemanager && (
+        <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-slate-700">Candles</div>
+              <div className="mt-1 text-[11px] text-slate-600">
+                Strumenti dedicati al microservizio cachemanager.
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-800">Get candle</div>
+                <div className="text-[11px] text-slate-500">Recupera candele dal provider selezionato.</div>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-slate-700">
+                <span className="font-semibold">Provider</span>
+                <label className="inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="provider"
+                    value="FMP"
+                    checked={provider === "FMP"}
+                    onChange={async () => {
+                      setProviderError(null);
+                      setProviderStatus("loading");
+                      try {
+                        const token =
+                          typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                        const res = await fetch(`${env.apiBaseUrl}/cachemanager/provider/FMP`, {
+                          method: "PUT",
+                          headers: {
+                            "Content-Type": "application/json",
+                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                          },
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok || data?.ok === false)
+                          throw new Error(data?.error || data?.message || "Errore set provider");
+                        setProvider("FMP");
+                        setProviderStatus("idle");
+                      } catch (err: any) {
+                        setProviderStatus("error");
+                        setProviderError(err?.message || "Errore cambio provider");
+                      }
+                    }}
+                    className="h-3 w-3"
+                  />
+                  <span>FMP</span>
+                </label>
+                <label className="inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="provider"
+                    value="ALPACA"
+                    checked={provider === "ALPACA"}
+                    onChange={async () => {
+                      setProviderError(null);
+                      setProviderStatus("loading");
+                      try {
+                        const token =
+                          typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                        const res = await fetch(`${env.apiBaseUrl}/cachemanager/provider/ALPACA`, {
+                          method: "PUT",
+                          headers: {
+                            "Content-Type": "application/json",
+                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                          },
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok || data?.ok === false)
+                          throw new Error(data?.error || data?.message || "Errore set provider");
+                        setProvider("ALPACA");
+                        setProviderStatus("idle");
+                      } catch (err: any) {
+                        setProviderStatus("error");
+                        setProviderError(err?.message || "Errore cambio provider");
+                      }
+                    }}
+                    className="h-3 w-3"
+                  />
+                  <span>Alpaca</span>
+                </label>
+                {providerStatus === "loading" && <span className="text-slate-500">Aggiornamento...</span>}
+              </div>
+            </div>
+            {providerError && <div className="mb-2 text-[11px] text-red-600">{providerError}</div>}
+            <form
+              className="grid gap-3 md:grid-cols-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setCandleStatus("loading");
+                setCandleError(null);
+                setCandleRows([]);
+                const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                const base = `${env.apiBaseUrl}/cachemanager/candles`;
+                const params = new URLSearchParams();
+                if (candleSymbol) params.set("symbol", candleSymbol);
+                if (candleStart) params.set("startDate", candleStart);
+                if (candleEnd) params.set("endDate", candleEnd);
+                if (candleTf) params.set("tf", candleTf);
+                try {
+                  const res = await fetch(`${base}?${params.toString()}`, {
+                    method: "GET",
+                    headers: {
+                      "Content-Type": "application/json",
+                      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) {
+                    throw new Error(data?.error || data?.message || "Errore richiesta");
+                  }
+                  const rows = Array.isArray(data) ? data : data?.data || data?.candles || [];
+                  setCandleRows(Array.isArray(rows) ? rows : []);
+                  setCandleStatus("idle");
+                } catch (err: any) {
+                  setCandleError(err?.message || "Errore nel recupero candele");
+                  setCandleStatus("error");
+                }
+              }}
+            >
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700">Symbol</label>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+                  value={candleSymbol}
+                  onChange={(e) => setCandleSymbol(e.target.value)}
+                  placeholder="AAPL"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700">Start date</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+                  value={candleStart}
+                  onChange={(e) => setCandleStart(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700">End date</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+                  value={candleEnd}
+                  onChange={(e) => setCandleEnd(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700">TF</label>
+                <select
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+                  value={candleTf}
+                  onChange={(e) => setCandleTf(e.target.value)}
+                >
+                  {["1m", "5m", "15m", "30m", "1h", "2h", "6h", "12h", "1d", "1w", "1M"].map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-4 flex justify-end">
+                <BaseButton
+                  type="submit"
+                  variant="solid"
+                  color="primary"
+                  size="sm"
+                  startIcon={<AppIcon icon="mdi:candle" />}
+                  disabled={candleStatus === "loading"}
+                >
+                  Get candle
+                </BaseButton>
+              </div>
+            </form>
+            {candleError && <div className="mt-2 text-[11px] text-red-600">{candleError}</div>}
+            {candleStatus === "loading" && <div className="mt-2 text-[11px] text-slate-500">Caricamento...</div>}
+            {candleRows.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-2 flex items-center gap-2 text-[11px]">
+                  <button
+                    className={`rounded-md px-3 py-1 text-xs font-semibold ${
+                      candleTab === "table"
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                    onClick={() => setCandleTab("table")}
+                  >
+                    Table
+                  </button>
+                  <button
+                    className={`rounded-md px-3 py-1 text-xs font-semibold ${
+                      candleTab === "chart"
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                    onClick={() => setCandleTab("chart")}
+                  >
+                    Chart
+                  </button>
+                </div>
+                {candleTab === "table" && (
+                  <div className="overflow-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">Time</th>
+                          <th className="px-3 py-2 font-semibold">Open</th>
+                          <th className="px-3 py-2 font-semibold">High</th>
+                          <th className="px-3 py-2 font-semibold">Low</th>
+                          <th className="px-3 py-2 font-semibold">Close</th>
+                          <th className="px-3 py-2 font-semibold">Volume</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {candleRows.map((candle, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2 text-slate-800">
+                              {candle.t || candle.time || candle.date || "-"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-800">{candle.o ?? candle.open ?? "-"}</td>
+                            <td className="px-3 py-2 text-slate-800">{candle.h ?? candle.high ?? "-"}</td>
+                            <td className="px-3 py-2 text-slate-800">{candle.l ?? candle.low ?? "-"}</td>
+                            <td className="px-3 py-2 text-slate-800">{candle.c ?? candle.close ?? "-"}</td>
+                            <td className="px-3 py-2 text-slate-800">{candle.v ?? candle.volume ?? "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {candleTab === "chart" && (
+                  <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                    {candleRows.length > 0 ? (
+                      <ReactApexChart
+                        type="candlestick"
+                        height={360}
+                        options={{
+                          chart: { toolbar: { show: false } },
+                          xaxis: {
+                            type: "datetime",
+                            labels: { style: { fontSize: "10px" } },
+                          },
+                          yaxis: [
+                            {
+                              tooltip: { enabled: true },
+                              labels: { style: { fontSize: "10px" } },
+                            },
+                            {
+                              opposite: true,
+                              seriesName: "Volume",
+                              labels: { style: { fontSize: "10px" } },
+                              show: true,
+                            },
+                          ],
+                          tooltip: { shared: true },
+                          plotOptions: {
+                            candlestick: {
+                              colors: { upward: "#10b981", downward: "#ef4444" },
+                            },
+                          },
                         }}
+                        series={[
+                          {
+                            name: "Candle",
+                            type: "candlestick",
+                            data: candleRows.map((c) => ({
+                              x: new Date(c.t || c.time || c.date || "").getTime(),
+                              y: [
+                                Number(c.o ?? c.open ?? 0),
+                                Number(c.h ?? c.high ?? 0),
+                                Number(c.l ?? c.low ?? 0),
+                                Number(c.c ?? c.close ?? 0),
+                              ],
+                            })),
+                          },
+                          {
+                            name: "Volume",
+                            type: "column",
+                            data: candleRows.map((c) => ({
+                              x: new Date(c.t || c.time || c.date || "").getTime(),
+                              y: Number(c.v ?? c.volume ?? 0),
+                            })),
+                          },
+                        ]}
                       />
-                      <span
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                          dbLogger ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
-                        } ${dbLoggerStatus === "loading" ? "opacity-70" : ""}`}
-                      >
-                        <span
-                          className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                            dbLogger ? "translate-x-4" : "translate-x-0.5"
-                          }`}
-                        />
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-700">
-                        {dbLogger ? "On" : "Off"}
-                      </span>
-                    </label>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Abilita o disabilita la scrittura dei log in DB.
-                    </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td className="pr-3 font-semibold text-slate-600">DB Level</td>
-                  <td className="py-1">
-                    <div className="flex items-center gap-2">
-                      <select
-                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
-                        value={logLevel ?? ""}
-                        disabled={logLevelStatus === "loading"}
-                        onChange={async (e) => {
-                          const next = e.target.value;
-                          setLogLevelError(null);
-                          setLogLevelStatus("loading");
-                          try {
-                            await setCacheLogLevel(next);
-                            setLogLevel(next);
-                            setLogLevelStatus("idle");
-                          } catch (err: any) {
-                            setLogLevelError(err?.message || "Errore aggiornando log level");
-                            setLogLevelStatus("error");
-                          }
-                        }}
-                      >
-                        <option value="">-</option>
-                        <option value="trace">trace</option>
-                        <option value="log">log</option>
-                        <option value="info">info</option>
-                        <option value="warning">warning</option>
-                        <option value="error">error</option>
-                      </select>
-                      {logLevelStatus === "loading" && (
-                        <span className="text-[11px] text-slate-500">Aggiornamento...</span>
-                      )}
-                    </div>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Seleziona il livello di log del cachemanager.
-                    </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td className="pr-3 font-semibold text-slate-600">Updated</td>
-                  <td className="py-1 whitespace-nowrap">{formatDateTime(filtered[0].updated_at)}</td>
-                </tr>
-              </tbody>
-            </table>
-            {dbLoggerError && (
-              <div className="mt-2">
-                <Alert message={dbLoggerError} tone="warn" onClose={() => setDbLoggerError(null)} />
+                    ) : (
+                      <div className="text-[11px] text-slate-600">Nessun dato da mostrare.</div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
-            {logLevelError && (
-              <div className="mt-2">
-                <Alert message={logLevelError} tone="warn" onClose={() => setLogLevelError(null)} />
-              </div>
+            {candleStatus === "idle" && candleRows.length === 0 && !candleError && (
+              <div className="mt-2 text-[11px] text-slate-500">Nessun risultato.</div>
             )}
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-700">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-xs font-semibold text-slate-700">Communication channels</div>
-              {communicationStatus === "loading" && (
-                <span className="text-[11px] text-slate-500">Caricamento...</span>
-              )}
-            </div>
-            {communicationError && (
-              <div className="mb-2">
-                <Alert
-                  message={communicationError}
-                  tone="warn"
-                  onClose={() => setCommunicationError(null)}
-                />
-              </div>
-            )}
-            {communicationSuccess && (
-              <div className="mb-2">
-                <Alert
-                  message={communicationSuccess}
-                  tone="success"
-                  onClose={() => setCommunicationSuccess(null)}
-                />
-              </div>
-            )}
-            <div className="rounded-md border border-slate-100 bg-white">
-              {channelOrder.map((key) => {
-                const ch = communicationChannels[key];
-                if (!ch) return null;
-                return (
-                  <div key={key} className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0">
-                    <div className="w-28 text-[11px] font-semibold text-slate-600 capitalize">{key}</div>
-                    <label className="inline-flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="peer sr-only"
-                        checked={!!ch.on}
-                        onChange={() => handleToggleChannel(key)}
-                        disabled={communicationSaving}
-                      />
-                      <span
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                          ch.on ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
-                        } ${communicationSaving ? "opacity-70" : ""}`}
-                      >
-                        <span
-                          className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                            ch.on ? "translate-x-4" : "translate-x-0.5"
-                          }`}
-                        />
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-700">{ch.on ? "On" : "Off"}</span>
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] text-slate-500">intervalsMs</span>
-                      <input
-                        type="number"
-                        min={1}
-                        className="w-24 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
-                        value={ch.intervalsMs}
-                        onChange={(e) =>
-                          setCommunicationChannels((prev) => ({
-                            ...prev,
-                            [key]: { ...(prev[key] || { on: false }), intervalsMs: e.target.value },
-                          }))
-                        }
-                        disabled={communicationSaving}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-              {Object.keys(communicationChannels || {}).length === 0 && communicationStatus !== "loading" && (
-                <div className="px-3 py-2 text-[11px] text-slate-500">Nessun channel disponibile</div>
-              )}
-            </div>
-            <div className="mt-3 flex justify-end">
+        </div>
+      )}
+
+      {filtered.length > 0 && activeTab === "specific" && isTickerScanner && (
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-[11px] text-slate-700">
+          <TickerScannerAdminPage />
+        </div>
+      )}
+
+      {filtered.length > 0 && activeTab === "cache" && isCachemanager && (
+        <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-slate-700">L3 Cache (Redis)</div>
+            <div className="flex items-center gap-2">
               <BaseButton
                 variant="outline"
                 color="neutral"
                 size="sm"
-                startIcon={<AppIcon icon="mdi:content-save-outline" />}
-                disabled={communicationSaving || communicationStatus === "loading"}
-                onClick={handleSaveChannels}
+                startIcon={<AppIcon icon="mdi:refresh" />}
+                onClick={() => {
+                  const token =
+                    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                  setL3Status("loading");
+                  fetch(`${env.apiBaseUrl}/cachemanager/status/L3/size`, {
+                    method: "GET",
+                    headers: {
+                      "Content-Type": "application/json",
+                      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                  })
+                    .then(async (res) => {
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok || data?.ok === false)
+                        throw new Error(data?.error || data?.message || "Errore L3 size");
+                      setL3Size(data.data || data);
+                      setL3Status("idle");
+                    })
+                    .catch((err) => {
+                      setL3Status("error");
+                      setL3Error(err?.message || "Errore nel recupero L3 size");
+                    });
+                }}
               >
-                Save channels
+                Reload
+              </BaseButton>
+              <BaseButton
+                variant="solid"
+                color="danger"
+                size="sm"
+                onClick={() => {
+                  setL3DeleteTarget({ type: "all" });
+                  setShowL3Confirm(true);
+                }}
+              >
+                Svuota cache
               </BaseButton>
             </div>
           </div>
+          {l3Status === "error" && l3Error && (
+            <div className="mt-1 text-[11px] text-red-600">{l3Error}</div>
+          )}
+          {l3Status === "loading" && <div className="mt-1 text-[11px] text-slate-500">Caricamento...</div>}
+          {l3Size && l3Status !== "loading" && (
+            <div className="mt-3 space-y-3">
+              {(() => {
+                const total = Number(l3Size.totalBytes || 0);
+                const max = Number(l3Size.maxmemory || 0);
+                const pct = max > 0 ? Math.min(100, (total / max) * 100) : 0;
+                let color = "bg-emerald-500";
+                if (pct >= 85) color = "bg-red-500";
+                else if (pct >= 75) color = "bg-amber-500";
+                else if (pct >= 50) color = "bg-yellow-500";
+                return (
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-700">
+                      <span>Utilizzo: {total.toLocaleString()} bytes</span>
+                      <span>Max: {max ? max.toLocaleString() : "-"} bytes</span>
+                    </div>
+                    {max ? (
+                      <div className="mt-1 h-3 w-full overflow-hidden rounded bg-slate-200">
+                        <div className={`h-3 ${color}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[11px] text-slate-500">Max memory non disponibile</div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="rounded-lg border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                  Keys (raggruppate per symbol)
+                </div>
+                <div className="max-h-64 overflow-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Symbol</th>
+                        <th className="px-3 py-2 font-semibold">Bytes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(() => {
+                        const groups: Record<string, { total: number; items: any[] }> = {};
+                        (l3Size.keys || []).forEach((k: any) => {
+                          const parts = String(k.key || "").split(":");
+                          const symbol = parts[1] || k.key || "unknown";
+                          if (!groups[symbol]) groups[symbol] = { total: 0, items: [] };
+                          groups[symbol].total += Number(k.bytes || 0);
+                          groups[symbol].items.push(k);
+                        });
+                        const totalBytes = Number(l3Size.totalBytes || 0) || 1;
+                        const symbols = Object.entries(groups);
+                        if (!symbols.length) {
+                          return (
+                            <tr>
+                              <td colSpan={2} className="px-3 py-2 text-slate-600">
+                                Nessuna chiave trovata.
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return symbols.map(([symbol, info]) => {
+                          const pct = Math.min(100, (info.total / totalBytes) * 100);
+                          const expanded = !!l3Expanded[symbol];
+                          return (
+                            <React.Fragment key={symbol}>
+                              <tr className="hover:bg-slate-50">
+                                <td
+                                  className="px-3 py-2 text-slate-800 cursor-pointer"
+                                  onClick={() =>
+                                    setL3Expanded((prev) => ({ ...prev, [symbol]: !prev[symbol] }))
+                                  }
+                                >
+                                  <span className="mr-2 text-[10px] text-slate-500">
+                                    {expanded ? "▼" : "▶"}
+                                  </span>
+                                  {symbol}
+                                </td>
+                                <td className="px-3 py-2 text-slate-800">
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-2 w-24 rounded bg-slate-200">
+                                      <div className="h-2 rounded bg-blue-500" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span>{info.total.toLocaleString()} B</span>
+                                    <button
+                                      type="button"
+                                      className="ml-auto text-red-600 hover:text-red-700"
+                                      title="Svuota simbolo"
+                                      onClick={() => {
+                                        setL3DeleteTarget({ type: "symbol", symbol });
+                                        setShowL3Confirm(true);
+                                      }}
+                                    >
+                                      <AppIcon icon="mdi:trash-can-outline" width={16} height={16} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {expanded &&
+                                info.items.map((k, idx) => {
+                                  const subPct = Math.min(100, (Number(k.bytes || 0) / info.total) * 100);
+                                  return (
+                                    <tr key={`${symbol}-${idx}`} className="bg-slate-50">
+                                      <td className="px-6 py-1 text-slate-700 break-all text-[11px]">{k.key}</td>
+                                      <td className="px-3 py-1 text-slate-700">
+                                        <div className="flex items-center gap-2">
+                                          <div className="h-2 w-16 rounded bg-slate-200">
+                                            <div className="h-2 rounded bg-emerald-500" style={{ width: `${subPct}%` }} />
+                                          </div>
+                                          <span>{Number(k.bytes || 0).toLocaleString()} B</span>
+                                          <button
+                                            type="button"
+                                            className="ml-auto text-red-600 hover:text-red-700"
+                                          title="Cancella file"
+                                          onClick={() => {
+                                            const parts = String(k.key || "").split(":");
+                                            const sym = parts[1] || symbol;
+                                            const tfPart = parts[2] || "";
+                                            setL3DeleteTarget({ type: "file", symbol: sym, tf: tfPart });
+                                            setShowL3Confirm(true);
+                                          }}
+                                        >
+                                            <AppIcon icon="mdi:trash-can-outline" width={14} height={14} />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                            </React.Fragment>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
-      {filtered.length > 0 && (
-        <div className="mt-3">
-          <MicroserviceLogsCard microservice={slug} limit={100} />
+
+      {filtered.length > 0 && activeTab === "l2" && isCachemanager && (
+        <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-slate-700">L2 Cache (File system)</div>
+              {l2Size?.totalBytes !== undefined && (
+                <div className="text-[11px] text-slate-500">
+                  {(() => {
+                    const symbols = Array.isArray(l2Size?.tree?.files)
+                      ? l2Size.tree.files.filter(
+                          (e: any) => !String(e?.path || "").toLowerCase().endsWith(".ds_store")
+                        ).length
+                      : 0;
+                    const files = l2Size.fileCount ?? l2Size?.tree?.fileCount ?? 0;
+                    const dirs = l2Size.dirCount ?? l2Size?.tree?.dirCount ?? symbols;
+                    return (
+                      <>
+                        Total: {formatBytes(l2Size.totalBytes)} · File: {files} · Symbol: {symbols} · Dir: {dirs}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+            {l2Status === "loading" && <span className="text-[11px] text-slate-500">Caricamento...</span>}
+            <div className="ml-auto flex items-center gap-2">
+              <BaseButton
+                variant="outline"
+                color="neutral"
+                size="sm"
+                startIcon={<AppIcon icon="mdi:refresh" />}
+                onClick={() => {
+                  const token =
+                    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                  setL2Status("loading");
+                  fetch(`${env.apiBaseUrl}/cachemanager/status/L2/size`, {
+                    method: "GET",
+                    headers: {
+                      "Content-Type": "application/json",
+                      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                  })
+                    .then(async (res) => {
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok || data?.ok === false)
+                        throw new Error(data?.error || data?.message || "Errore L2 size");
+                      setL2Size(data.data || data);
+                      setL2Status("idle");
+                    })
+                    .catch((err) => {
+                      setL2Status("error");
+                      setL2Error(err?.message || "Errore nel recupero L2 size");
+                    });
+                }}
+              >
+                Reload
+              </BaseButton>
+              <BaseButton
+                variant="outline"
+                color="danger"
+                size="sm"
+                startIcon={<AppIcon icon="mdi:delete" />}
+                onClick={() => {
+                  setL2DeleteTarget({ type: "all" });
+                  setShowL2Confirm(true);
+                }}
+              >
+                Svuota cache
+              </BaseButton>
+            </div>
+          </div>
+          {(() => {
+            const total = Number(l2Size?.totalBytes || 0);
+            const maxMb = Number((l2Size?.maxSizeCache ?? l2Size?.maxSizecache ?? l2Size?.maxsizecache) || 0);
+            const maxBytes = Number.isFinite(maxMb) && maxMb > 0 ? maxMb * 1024 * 1024 : 0;
+            if (!maxBytes) return null;
+            const pct = Math.min(100, (total / maxBytes) * 100);
+            let color = "bg-emerald-500";
+            if (pct >= 85) color = "bg-red-500";
+            else if (pct >= 75) color = "bg-amber-500";
+            else if (pct >= 50) color = "bg-yellow-500";
+            return (
+              <div className="mb-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-700">
+                  <span>Utilizzo: {formatBytes(total)}</span>
+                  <span>Max: {maxBytes ? formatBytes(maxBytes) : "-"}</span>
+                </div>
+                <div className="mt-1 h-3 w-full overflow-hidden rounded bg-slate-200">
+                  <div className={`h-3 ${color}`} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })()}
+          {l2Error && (
+            <div className="mb-2">
+              <Alert message={l2Error} tone="warn" onClose={() => setL2Error(null)} />
+            </div>
+          )}
+          {!l2Error && l2Size && l2Size.exists === false && (
+            <div className="text-[11px] text-slate-500">Directory cache non trovata.</div>
+          )}
+          {!l2Error && l2Size && l2Size.exists !== false && (
+            <div className="rounded-md border border-slate-200 bg-white">
+              {(() => {
+                const rawEntries = Array.isArray(l2Size?.tree?.files) ? l2Size.tree.files : [];
+                const entries = rawEntries
+                  .filter((e: any) => {
+                    const p = String(e?.path || "").toLowerCase();
+                    return p && !p.endsWith(".ds_store");
+                  })
+                  .map((entry: any, idx: number) => {
+                    const name =
+                      typeof entry?.path === "string"
+                        ? entry.path.split(/[/\\]/).filter(Boolean).pop() || entry.path
+                        : `item-${idx}`;
+                    return { name, data: entry };
+                  })
+                  .sort((a, b) => a.name.localeCompare(b.name));
+
+                const letters = Array.from(
+                  new Set(entries.map((e) => (e.name[0] ? e.name[0].toUpperCase() : "")).filter(Boolean))
+                ).sort();
+                const useFilter = entries.length > 20;
+                const activeLetter =
+                  letters.length === 0
+                    ? null
+                    : l2Letter && letters.includes(l2Letter)
+                      ? l2Letter
+                      : useFilter
+                        ? letters[0] || null
+                        : null;
+
+                const normalizedSearch = (l2Search || "").trim().toUpperCase();
+                const filtered =
+                  useFilter && activeLetter
+                    ? entries.filter(
+                        (e) =>
+                          e.name.toUpperCase().startsWith(activeLetter) &&
+                          (!normalizedSearch || e.name.toUpperCase().includes(normalizedSearch))
+                      )
+                    : entries.filter((e) => !normalizedSearch || e.name.toUpperCase().includes(normalizedSearch));
+
+                const totalFromRoot = typeof l2Size?.totalBytes === "number" ? l2Size.totalBytes : 0;
+                const sumChildren =
+                  totalFromRoot > 0
+                    ? totalFromRoot
+                    : entries.reduce((sum: number, e: any) => sum + getNodeBytes(e.data), 0);
+
+                return (
+                  <>
+                    {entries.length > 20 && (
+                      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2 text-[11px]">
+                        <div className="flex flex-wrap gap-1">
+                          {letters.map((ltr) => (
+                            <button
+                              key={ltr}
+                              type="button"
+                              className={`rounded px-2 py-1 font-semibold ${
+                                ltr === activeLetter
+                                  ? "bg-slate-900 text-white"
+                                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                              }`}
+                              onClick={() => setL2Letter(ltr)}
+                            >
+                              {ltr}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="ml-auto flex items-center gap-1">
+                          <input
+                            type="text"
+                            list="l2-symbols"
+                            placeholder="Cerca symbol"
+                            className="w-40 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+                            value={l2Search}
+                            onChange={(e) => setL2Search(e.target.value)}
+                          />
+                          <datalist id="l2-symbols">
+                            {entries.map((e) => (
+                              <option key={e.name} value={e.name} />
+                            ))}
+                          </datalist>
+                        </div>
+                      </div>
+                    )}
+                    <table className="min-w-full text-[11px] text-slate-700">
+                      <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">Path</th>
+                          <th className="px-3 py-2 font-semibold w-48">Size</th>
+                          <th className="px-3 py-2 font-semibold text-right w-24">Bytes</th>
+                          <th className="px-2 py-2 font-semibold text-right w-12"> </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filtered.map(({ name, data }, idx: number) => {
+                          const total = sumChildren || 0;
+                          const entryBytes = getNodeBytes(data);
+                          const pct = total > 0 ? (entryBytes / total) * 100 : 0;
+                          const expanded = !!l2Expanded[name];
+                          const children = Array.isArray(data?.files)
+                            ? data.files.filter(
+                                (c: any) => !String(c?.path || "").toLowerCase().endsWith(".ds_store")
+                              )
+                            : [];
+                          return (
+                            <React.Fragment key={`${name}-${idx}`}>
+                              <tr
+                                className="hover:bg-slate-50 cursor-pointer"
+                                onClick={() =>
+                                  setL2Expanded((prev) => ({
+                                    ...prev,
+                                    [name]: !expanded,
+                                  }))
+                                }
+                              >
+                                <td className="px-3 py-2 font-semibold text-slate-800">{name}</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="relative h-2 w-full rounded-full bg-slate-100">
+                                      <div
+                                        className={`absolute left-0 top-0 h-2 rounded-full ${progressColor(pct)}`}
+                                        style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                                      />
+                                    </div>
+                                    <span className="whitespace-nowrap text-[11px] text-slate-600">
+                                      {pct.toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap">{formatBytes(entryBytes)}</td>
+                                <td className="px-2 py-2 text-right">
+                                  <button
+                                    type="button"
+                                    className="rounded-full p-1 text-red-500 hover:bg-red-50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setL2DeleteTarget({ type: "symbol", symbol: name });
+                                      setShowL2Confirm(true);
+                                    }}
+                                    aria-label={`Cancella ${name}`}
+                                  >
+                                    <AppIcon icon="mdi:trash-can-outline" width={16} height={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                              {expanded &&
+                                children.map((child: any, cIdx: number) => {
+                                  const childName =
+                                    typeof child?.path === "string"
+                                      ? child.path.split(/[/\\]/).filter(Boolean).pop() || child.path
+                                      : `child-${cIdx}`;
+                                  const childBytes = getNodeBytes(child);
+                                  const pctChild = entryBytes > 0 ? (childBytes / entryBytes) * 100 : 0;
+                                  return (
+                                    <tr key={`${name}-${childName}`} className="bg-slate-50">
+                                      <td className="px-6 py-1 text-slate-700">{childName}</td>
+                                      <td className="px-3 py-1">
+                                        <div className="flex items-center gap-2">
+                                          <div className="relative h-2 w-full rounded-full bg-slate-100">
+                                            <div
+                                              className={`absolute left-0 top-0 h-2 rounded-full ${progressColor(pctChild)}`}
+                                              style={{ width: `${Math.min(100, Math.max(0, pctChild))}%` }}
+                                            />
+                                          </div>
+                                          <span className="whitespace-nowrap text-[11px] text-slate-600">
+                                            {pctChild.toFixed(1)}%
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-1 text-right whitespace-nowrap">
+                                        {formatBytes(childBytes)}
+                                      </td>
+                                      <td className="px-2 py-1 text-right">
+                                        <button
+                                          type="button"
+                                          className="rounded-full p-1 text-red-500 hover:bg-red-50"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setL2DeleteTarget({ type: "file", symbol: name, tf: childName });
+                                            setShowL2Confirm(true);
+                                          }}
+                                          aria-label={`Cancella ${childName}`}
+                                        >
+                                          <AppIcon icon="mdi:trash-can-outline" width={14} height={14} />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                            </React.Fragment>
+                          );
+                        })}
+                        {filtered.length === 0 && (
+                          <tr>
+                            <td className="px-3 py-2 text-slate-500" colSpan={3}>
+                              Nessun file presente nella cache.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
 
@@ -823,132 +1377,149 @@ export default function AdminMicroserviceDetailPage() {
         </div>
       )}
 
-      {showSettingsModal && isCachemanager && (
+      {showL3Confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <div className="text-base font-semibold text-slate-900">DB Settings</div>
-              <button
-                type="button"
-                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                onClick={() => setShowSettingsModal(false)}
-              >
-                Chiudi
-              </button>
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <div className="mb-3 text-base font-semibold text-slate-900">Conferma cancellazione cache</div>
+            <div className="text-sm text-slate-700">
+              {l3DeleteTarget?.type === "all" && "Questa operazione cancellerà tutti i dati dalla cache L3 (Redis)."}
+              {l3DeleteTarget?.type === "symbol" &&
+                `Verranno cancellati tutti i dati del symbol ${l3DeleteTarget.symbol || "(sconosciuto)"}.`}
+              {l3DeleteTarget?.type === "file" &&
+                `Verranno cancellati i dati del symbol ${l3DeleteTarget.symbol || "(sconosciuto)"} per ${
+                  l3DeleteTarget.tf || "(tf)"
+                }.`}
             </div>
-            <div className="max-h-[60vh] overflow-y-auto px-4 py-3 text-[11px] text-slate-700">
-              {settingsStatus === "loading" && <div className="text-[11px] text-slate-500">Caricamento...</div>}
-              {settingsError && (
-                <div className="mb-2">
-                  <Alert message={settingsError} tone="warn" onClose={() => setSettingsError(null)} />
-                </div>
-              )}
-              {settingsSuccess && (
-                <div className="mb-2">
-                  <Alert
-                    message={settingsSuccess}
-                    tone="success"
-                    onClose={() => setSettingsSuccess(null)}
-                  />
-                </div>
-              )}
-              {!settingsError && settings && (
-                <table className="min-w-[200px] text-[11px] text-slate-700">
-                  <tbody>
-                    {Object.entries(editableSettings).map(([key, val]) => (
-                      <tr key={key} className="border-t border-slate-100 first:border-t-0">
-                        <td className="pr-3 font-semibold text-slate-600 align-top">{key}</td>
-                        <td className="py-1">
-                          <input
-                            className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
-                            value={val}
-                            onChange={(e) =>
-                              setEditableSettings((prev) => ({
-                                ...prev,
-                                [key]: e.target.value,
-                              }))
-                            }
-                            disabled={savingSettings}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              {saveSettingsError && (
-                <div className="mt-2">
-                  <Alert
-                    message={saveSettingsError}
-                    tone="warn"
-                    onClose={() => setSaveSettingsError(null)}
-                  />
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+            <div className="mt-4 flex items-center justify-end gap-2">
               <BaseButton
                 variant="outline"
                 color="neutral"
                 size="sm"
-                startIcon={<AppIcon icon="mdi:database-refresh" />}
-                disabled={savingSettings || settingsStatus === "loading"}
-                onClick={async () => {
-                  setSettingsStatus("loading");
-                  setSettingsError(null);
-                  setSaveSettingsError(null);
-                  setSettingsSuccess(null);
-                  try {
-                    await reloadCacheSettings();
-                    const data = await fetchCacheSettings();
-                    setSettings(data);
-                    const obj: Record<string, string> = {};
-                    Object.entries(data || {}).forEach(([k, v]) => {
-                      obj[k] = v != null ? String(v) : "";
-                    });
-                    setEditableSettings(obj);
-                    setSettingsStatus("idle");
-                    setSettingsSuccess("Settings ricaricati dal DB");
-                  } catch (err: any) {
-                    setSettingsError(err?.message || "Errore nel ricaricare i settings");
-                    setSettingsStatus("error");
-                  }
-                }}
+                onClick={() => setShowL3Confirm(false)}
               >
-                Reload from DB
+                Cancella
               </BaseButton>
               <BaseButton
-                variant="outline"
-                color="neutral"
+                variant="solid"
+                color="danger"
                 size="sm"
-                startIcon={<AppIcon icon="mdi:content-save-outline" />}
-                disabled={savingSettings || settingsStatus === "loading"}
                 onClick={async () => {
-                  if (!settings) return;
-                  setSaveSettingsError(null);
-                  setSettingsSuccess(null);
-                  setSavingSettings(true);
+                  const token =
+                    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
                   try {
-                    const changes = Object.entries(editableSettings).filter(
-                      ([k, v]) => String(settings?.[k] ?? "") !== v
-                    );
-                    for (const [key, value] of changes) {
-                      await updateCacheSetting(key, value);
+                    let url = `${env.apiBaseUrl}/cachemanager/status/L3/size`;
+                    if (l3DeleteTarget?.type === "symbol" && l3DeleteTarget.symbol) {
+                      url = `${url}/${encodeURIComponent(l3DeleteTarget.symbol)}`;
+                    } else if (l3DeleteTarget?.type === "file" && l3DeleteTarget.symbol) {
+                      url = `${url}/${encodeURIComponent(l3DeleteTarget.symbol)}/${encodeURIComponent(
+                        l3DeleteTarget.tf || ""
+                      )}`;
                     }
-                    const updated: Record<string, unknown> = {};
-                    Object.entries(editableSettings).forEach(([k, v]) => {
-                      updated[k] = v;
+
+                    const res = await fetch(url, {
+                      method: "DELETE",
+                      headers: {
+                        "Content-Type": "application/json",
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      },
                     });
-                    setSettings(updated);
-                    setSavingSettings(false);
-                    setSettingsSuccess("Settings salvati in cache");
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore DELETE");
+                    setShowL3Confirm(false);
+                    setL3DeleteTarget(null);
+                    // refresh size
+                    setL3Status("loading");
+                    const resSize = await fetch(`${env.apiBaseUrl}/cachemanager/status/L3/size`, {
+                      method: "GET",
+                      headers: {
+                        "Content-Type": "application/json",
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      },
+                    });
+                    const sizeData = await resSize.json().catch(() => ({}));
+                    if (resSize.ok && sizeData?.data) setL3Size(sizeData.data);
+                    setL3Status("idle");
                   } catch (err: any) {
-                    setSaveSettingsError(err?.message || "Errore nel salvataggio dei settings");
-                    setSavingSettings(false);
+                    setL3Status("error");
+                    setL3Error(err?.message || "Errore nello svuotare la cache");
+                    setShowL3Confirm(false);
+                    setL3DeleteTarget(null);
                   }
                 }}
               >
-                Save
+                OK
+              </BaseButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showL2Confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <div className="mb-3 text-base font-semibold text-slate-900">Conferma cancellazione cache L2</div>
+            <div className="text-sm text-slate-700">
+              {l2DeleteTarget?.type === "all" && "Questa operazione cancellerà tutti i file nella cache L2."}
+              {l2DeleteTarget?.type === "symbol" &&
+                `Verranno cancellati tutti i dati del symbol ${l2DeleteTarget.symbol || "(sconosciuto)"}.`}
+              {l2DeleteTarget?.type === "file" &&
+                `Verranno cancellati i dati del symbol ${l2DeleteTarget.symbol || "(sconosciuto)"} per ${
+                  l2DeleteTarget.tf || "(file)"
+                }.`}
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <BaseButton variant="outline" color="neutral" size="sm" onClick={() => setShowL2Confirm(false)}>
+                Cancella
+              </BaseButton>
+              <BaseButton
+                variant="solid"
+                color="danger"
+                size="sm"
+                onClick={async () => {
+                  const token =
+                    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                  try {
+                    let url = `${env.apiBaseUrl}/cachemanager/status/L2/size`;
+                    if (l2DeleteTarget?.type === "symbol" && l2DeleteTarget.symbol) {
+                      url = `${url}/${encodeURIComponent(l2DeleteTarget.symbol)}`;
+                    } else if (l2DeleteTarget?.type === "file" && l2DeleteTarget.symbol) {
+                      url = `${url}/${encodeURIComponent(l2DeleteTarget.symbol)}/${encodeURIComponent(
+                        l2DeleteTarget.tf || ""
+                      )}`;
+                    }
+
+                    const res = await fetch(url, {
+                      method: "DELETE",
+                      headers: {
+                        "Content-Type": "application/json",
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      },
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore DELETE");
+                    setShowL2Confirm(false);
+                    setL2DeleteTarget(null);
+                    // refresh L2 size
+                    setL2Status("loading");
+                    const resSize = await fetch(`${env.apiBaseUrl}/cachemanager/status/L2/size`, {
+                      method: "GET",
+                      headers: {
+                        "Content-Type": "application/json",
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      },
+                    });
+                    const sizeData = await resSize.json().catch(() => ({}));
+                    if (resSize.ok && sizeData?.data) setL2Size(sizeData.data);
+                    setL2Status("idle");
+                  } catch (err: any) {
+                    setL2Status("error");
+                    setL2Error(err?.message || "Errore nello svuotare la cache L2");
+                    setShowL2Confirm(false);
+                    setL2DeleteTarget(null);
+                  }
+                }}
+              >
+                OK
               </BaseButton>
             </div>
           </div>

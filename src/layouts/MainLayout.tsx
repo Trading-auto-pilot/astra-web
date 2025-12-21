@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Logo from "../components/atoms/media/Logo";
 import UserMenu from "../components/molecules/navigation/UserMenu";
 import { useRelease } from "../hooks/useReleaseInfo";
 import BaseButton from "../components/atoms/base/buttons/BaseButton";
+import { fetchServiceFlags } from "../api/serviceFlags";
 
 export type MainLayoutProps = {
   children: ReactNode;
@@ -57,16 +58,14 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     }
 
     if (page === "admin/*" || page === "admin") {
-      ["users", "api_key", "scheduler", "ticker_scanner", "microservice"].forEach((segment) => {
+      ["users", "api_key", "scheduler", "microservice"].forEach((segment) => {
         const href = `#/admin/${segment}`;
         const label =
           segment === "api_key"
             ? "API Key"
-            : segment === "ticker_scanner"
-              ? "Tickers Scanner"
-              : segment === "microservice"
-                ? "Microservice"
-                : formatLabel(segment);
+            : segment === "microservice"
+              ? "Microservice"
+              : formatLabel(segment);
         if (!adminChildren.some((child) => child.href === href)) {
           adminChildren.push({ label, href });
         }
@@ -81,11 +80,9 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
       const label =
         segment === "api_key"
           ? "API Key"
-          : segment === "ticker_scanner"
-            ? "Tickers Scanner"
-            : segment === "microservice"
-              ? "Microservice"
-              : formatLabel(segment);
+          : segment === "microservice"
+            ? "Microservice"
+            : formatLabel(segment);
       if (!adminChildren.some((child) => child.href === href)) {
         adminChildren.push({ label, href });
       }
@@ -98,7 +95,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
   }
 
   if (adminChildren.length) {
-    const order = { users: 0, api_key: 1, scheduler: 2, ticker_scanner: 3, microservice: 4 } as Record<string, number>;
+    const order = { users: 0, api_key: 1, scheduler: 2, microservice: 3 } as Record<string, number>;
     adminChildren.sort((a, b) => {
       const aKey = String(a.href || "").replace(/^#\/admin\//, "");
       const bKey = String(b.href || "").replace(/^#\/admin\//, "");
@@ -124,8 +121,28 @@ export function MainLayout({
   const currentHash = typeof window !== "undefined" ? window.location.hash || "#/overview" : "#/overview";
   const [openNav, setOpenNav] = useState(false);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
+  const [microservices, setMicroservices] = useState<string[]>([]);
+  const [microserviceMenuOpen, setMicroserviceMenuOpen] = useState(false);
 
   const closeNav = () => setOpenNav(false);
+
+  useEffect(() => {
+    fetchServiceFlags()
+      .then((items) => {
+        const names = Array.from(
+          new Set(
+            items
+              .map((i) => i.microservice)
+              .filter((n): n is string => !!n)
+              .map((n) => n.trim())
+          )
+        ).sort((a, b) => a.localeCompare(b));
+        setMicroservices(names);
+      })
+      .catch(() => {
+        setMicroservices([]);
+      });
+  }, []);
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -163,8 +180,62 @@ export function MainLayout({
                   </div>
                   <div className="space-y-1 pl-2">
                     {link.children.map((child) => {
+                      const isMicroserviceEntry = child.label === "Microservice";
                       const isActive =
                         child.href && (currentHash === child.href || currentHash.startsWith(`${child.href}/`));
+                      if (isMicroserviceEntry) {
+                        const microHref = child.href ?? "#/admin/microservice";
+                        return (
+                          <div key={child.href ?? child.label} className="space-y-1">
+                            <div
+                              className={`flex w-full items-center justify-between rounded-md px-3 py-2 hover:bg-slate-100 ${
+                                isActive ? "bg-slate-100 font-semibold text-slate-900" : ""
+                              }`}
+                            >
+                              <a
+                                className="flex-1 text-left"
+                                href={microHref}
+                                onClick={closeNav}
+                              >
+                                Microservice
+                              </a>
+                              <button
+                                type="button"
+                                className="ml-2 rounded px-1 text-xs text-slate-500 hover:bg-slate-200"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setMicroserviceMenuOpen((prev) => !prev);
+                                }}
+                                aria-label="Toggle microservice menu"
+                            >
+                              {microserviceMenuOpen ? "▼" : "▶"}
+                            </button>
+                          </div>
+                          {microserviceMenuOpen && microservices.length > 0 && (
+                            <div className="space-y-1 pl-4">
+                              {microservices.map((name) => {
+                                const href = `#/admin/microservice/${encodeURIComponent(name)}`;
+                                const active =
+                                  currentHash === href || currentHash.startsWith(`${href}/`);
+                                return (
+                                    <a
+                                      key={href}
+                                      className={`block rounded-md px-3 py-2 hover:bg-slate-100 ${
+                                        active ? "bg-slate-100 font-semibold text-slate-900" : ""
+                                      }`}
+                                      href={href}
+                                      onClick={closeNav}
+                                    >
+                                      {name}
+                                    </a>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
                       return (
                         <a
                           key={child.href ?? child.label}

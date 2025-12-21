@@ -70,7 +70,8 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
       if (safeSize) params.set("limit", String(safeSize));
       const offset = pageIndex * safeSize;
       if (offset > 0) params.set("offset", String(offset));
-      if (onlyThisService && microservice) params.set("microservice", microservice);
+      const msParam = microservice ? String(microservice).trim() : "";
+      if (onlyThisService && msParam) params.set("microservice", msParam);
       const url = `${env.apiBaseUrl}/cachemanager/Log${params.toString() ? `?${params.toString()}` : ""}`;
       const res = await fetch(url, {
         headers: {
