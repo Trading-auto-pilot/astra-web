@@ -56,7 +56,6 @@ export default function MicroserviceGeneralTab({
   const [logLevelStatus, setLogLevelStatus] = useState<Status>("idle");
   const [logLevelError, setLogLevelError] = useState<string | null>(null);
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
-  const [health, setHealth] = useState<Record<string, any> | null>(null);
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [settingsStatus, setSettingsStatus] = useState<Status>("idle");
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -199,11 +198,9 @@ export default function MicroserviceGeneralTab({
 
     apiGet("status/health")
       .then((data) => {
-        setHealth(data as any);
         onHealthChange?.(data as any);
       })
       .catch(() => {
-        setHealth(null);
         onHealthChange?.(null);
       });
 
