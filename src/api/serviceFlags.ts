@@ -331,3 +331,88 @@ export async function updateCacheCommunicationChannels(
 
   return (data as any)?.communicationChannels || (data as any)?.channels || payload;
 }
+
+// Scheduler equivalents
+export async function fetchSchedulerReleaseInfo(signal?: AbortSignal): Promise<ReleaseInfo> {
+  const token = getToken();
+  const response = await fetch(buildUrl("/scheduler/release"), {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    signal,
+  });
+  const data = await parseJsonSafely(response);
+  if (!response.ok) {
+    const message = (data as any)?.message ?? (data as any)?.error ?? "Unable to load scheduler release";
+    throw new Error(typeof message === "string" ? message : "Unable to load scheduler release");
+  }
+  return data as ReleaseInfo;
+}
+
+export async function fetchSchedulerHealth(signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const token = getToken();
+  const response = await fetch(buildUrl("/scheduler/status/health"), {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    signal,
+  });
+  const data = await parseJsonSafely(response);
+  if (!response.ok) {
+    const message = (data as any)?.message ?? (data as any)?.error ?? "Unable to load scheduler health";
+    throw new Error(typeof message === "string" ? message : "Unable to load scheduler health");
+  }
+  return data as Record<string, unknown>;
+}
+
+export async function fetchSchedulerCommunicationChannels(
+  signal?: AbortSignal
+): Promise<CommunicationChannels> {
+  const token = getToken();
+  const response = await fetch(buildUrl("/scheduler/status/communicationChannels"), {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    signal,
+  });
+
+  const data = await parseJsonSafely(response);
+  if (!response.ok) {
+    const message =
+      (data as any)?.message ?? (data as any)?.error ?? "Unable to load communication channels";
+    throw new Error(typeof message === "string" ? message : "Unable to load communication channels");
+  }
+
+  return (data as any)?.communicationChannels || (data as any)?.channels || {};
+}
+
+export async function updateSchedulerCommunicationChannels(
+  payload: CommunicationChannels
+): Promise<CommunicationChannels> {
+  const token = getToken();
+  const response = await fetch(buildUrl("/scheduler/status/communicationChannels"), {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ communicationChannels: payload }),
+  });
+
+  const data = await parseJsonSafely(response);
+  if (!response.ok) {
+    const message =
+      (data as any)?.message ?? (data as any)?.error ?? "Unable to update communication channels";
+    throw new Error(
+      typeof message === "string" ? message : "Unable to update communication channels"
+    );
+  }
+
+  return (data as any)?.communicationChannels || (data as any)?.channels || payload;
+}
