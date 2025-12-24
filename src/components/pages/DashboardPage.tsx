@@ -11,6 +11,7 @@ import SchedulerPage from "./SchedulerPage";
 import ApiKeysPage from "./ApiKeysPage";
 import AdminMicroservicePage from "./AdminMicroservicePage";
 import AdminMicroserviceDetailPage from "./AdminMicroserviceDetailPage";
+import UserSettingsPage from "./UserSettingsPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
@@ -34,7 +35,7 @@ export type DashboardPageProps = {
   extraContent?: ReactNode;
 };
 
-type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys" | "microservice";
+type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys" | "microservice" | "userSettings";
 
 const getAppSection = (): AppSection => {
   if (typeof window === "undefined") return "overview";
@@ -45,6 +46,7 @@ const getAppSection = (): AppSection => {
 
   if (parts[0] === "dashboard") {
     if (parts[1] === "tickers") return "tickers";
+    if (parts[1] === "user-settings") return "userSettings";
     return "overview";
   }
 
@@ -81,6 +83,14 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <UsersPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "userSettings") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <UserSettingsPage />
       </DashboardLayout>
     );
   }

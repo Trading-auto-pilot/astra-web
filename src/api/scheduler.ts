@@ -10,6 +10,8 @@ export type SchedulerJob = {
   jobKey?: string;
   description?: string;
   enabled?: boolean;
+  openMarket?: boolean;
+  exchanges?: string[];
   method?: string;
   url?: string;
   timezone?: string;

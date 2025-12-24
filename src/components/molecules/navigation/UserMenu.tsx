@@ -21,7 +21,13 @@ export type UserMenuProps = {
 
 const defaultItems: UserMenuItem[] = [
   { label: "Profilo", icon: "mdi:account-circle-outline" },
-  { label: "Impostazioni", icon: "mdi:cog-outline" },
+  {
+    label: "Impostazioni",
+    icon: "mdi:cog-outline",
+    onClick: () => {
+      window.location.hash = "/dashboard/user-settings";
+    },
+  },
   { label: "Logout", icon: "mdi:logout-variant", tone: "danger" },
 ];
 

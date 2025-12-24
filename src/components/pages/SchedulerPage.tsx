@@ -165,6 +165,8 @@ export function SchedulerPage() {
     jobKey: "",
     description: "",
     enabled: true,
+    openMarket: false,
+    exchanges: [],
     method: "GET",
     url: "",
     timeoutMs: 15000,
@@ -335,6 +337,13 @@ export function SchedulerPage() {
         jobKey: editingDraft.jobKey,
         description: editingDraft.description,
         enabled: !!editingDraft.enabled,
+        openMarket: !!editingDraft.openMarket,
+        exchanges:
+          typeof (editingDraft as any)?.exchangesText === "string"
+            ? parseList((editingDraft as any)?.exchangesText)
+            : Array.isArray(editingDraft.exchanges)
+              ? editingDraft.exchanges
+              : [],
         method: editingDraft.method || "GET",
         url: editingDraft.url,
         headers,
@@ -477,6 +486,13 @@ export function SchedulerPage() {
         jobKey: createDraft.jobKey,
         description: createDraft.description,
         enabled: !!createDraft.enabled,
+        openMarket: !!createDraft.openMarket,
+        exchanges:
+          typeof (createDraft as any)?.exchangesText === "string"
+            ? parseList((createDraft as any)?.exchangesText)
+            : Array.isArray(createDraft.exchanges)
+              ? createDraft.exchanges
+              : [],
         method: createDraft.method || "GET",
         url: createDraft.url,
         headers,
@@ -609,6 +625,24 @@ export function SchedulerPage() {
                 onChange={(e) => updateCreateField("enabled", e.target.checked)}
               />
               Enabled
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <input
+                type="checkbox"
+                checked={!!createDraft.openMarket}
+                onChange={(e) => updateCreateField("openMarket", e.target.checked)}
+              />
+              Market aware (skip se exchange chiuso)
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">
+              Exchanges (comma)
+              <input
+                type="text"
+                placeholder="NYSE,NASDAQ"
+                value={(createDraft as any)?.exchangesText ?? (createDraft.exchanges || []).join(",")}
+                onChange={(e) => updateCreateField("exchangesText", e.target.value)}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+              />
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Timeout (ms)
@@ -940,6 +974,19 @@ export function SchedulerPage() {
                 className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
               />
             </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">
+              Exchanges (comma)
+              <input
+                type="text"
+                placeholder="NYSE,NASDAQ"
+                value={
+                  (editingDraft as any)?.exchangesText ??
+                  (Array.isArray(editingDraft.exchanges) ? editingDraft.exchanges.join(",") : "")
+                }
+                onChange={(e) => updateDraftField("exchangesText", e.target.value)}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+              />
+            </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Metodo
               <select
@@ -961,6 +1008,14 @@ export function SchedulerPage() {
                 onChange={(e) => updateDraftField("enabled", e.target.checked)}
               />
               Enabled
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <input
+                type="checkbox"
+                checked={!!editingDraft.openMarket}
+                onChange={(e) => updateDraftField("openMarket", e.target.checked)}
+              />
+              Market aware (skip se exchange chiuso)
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">
               URL

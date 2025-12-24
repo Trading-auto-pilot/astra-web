@@ -15,6 +15,7 @@
   "dependencies": {
     "@iconify/react": "^6.0.2",
     "apexcharts": "^5.3.6",
+    "rc-slider": "^10.6.2",
     "react": "^19.2.0",
     "react-apexcharts": "^1.9.0",
     "react-country-flag": "^3.1.0",

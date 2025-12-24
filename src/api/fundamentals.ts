@@ -120,6 +120,44 @@ export async function fetchFundamentals(): Promise<FundamentalRecord[]> {
   return extractRecords(data);
 }
 
+export async function fetchFundamentalsHistory(params?: { symbol?: string; days?: number }) {
+  const token =
+    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+
+  const search = new URLSearchParams();
+  if (params?.symbol) search.set("symbol", params.symbol);
+  if (params?.days != null && Number.isFinite(params.days)) search.set("days", String(params.days));
+
+  const url = `${FUNDAMENTALS_ENDPOINT}/history${search.toString() ? `?${search.toString()}` : ""}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  const data = await parseJsonSafely(response);
+
+  if (!response.ok) {
+    const message = (data as any)?.message ?? "Unable to load fundamentals history";
+    throw new Error(typeof message === "string" ? message : "Unable to load fundamentals history");
+  }
+
+  const records = extractRecords(data);
+  // estrai elenco date disponibili (as_of_date)
+  const dates = Array.from(
+    new Set(
+      records
+        .map((r: any) => r.as_of_date || r.asOfDate)
+        .filter((d) => typeof d === "string" && d.length > 0)
+    )
+  ).sort((a, b) => (a < b ? 1 : -1)); // desc
+
+  return { records, dates };
+}
+
 export async function fetchFmpVariant(symbol: string, signal?: AbortSignal): Promise<any | null> {
   if (!env.fmpApiKey) {
     throw new Error("Missing FMP API key");
