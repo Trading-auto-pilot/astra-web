@@ -9,6 +9,7 @@ export type MomentumComponents = {
 export type TickerDetailTabProps = {
   detailRows: DetailRow[];
   momentumComponents?: MomentumComponents | null;
+  summaryScores?: { label: string; value: number | null }[];
 };
 
 const formatMomentumValue = (value: unknown) => {
@@ -30,7 +31,13 @@ const flattenComponents = (obj: Record<string, unknown>, prefix = ""): DetailRow
   });
 };
 
-export function TickerDetailTab({ detailRows, momentumComponents }: TickerDetailTabProps) {
+const formatScoreValue = (value: number | null) => {
+  if (value === null || value === undefined) return "-";
+  if (!Number.isFinite(value)) return "-";
+  return Number(value).toFixed(2);
+};
+
+export function TickerDetailTab({ detailRows, momentumComponents, summaryScores = [] }: TickerDetailTabProps) {
   if (!detailRows.length) {
     return <div className="px-2 py-3 text-sm text-slate-500">Nessun dettaglio disponibile.</div>;
   }
@@ -105,6 +112,26 @@ export function TickerDetailTab({ detailRows, momentumComponents }: TickerDetail
                   <td className="px-3 py-2 text-[12px] text-slate-800 break-words">{row.value}</td>
                 </tr>
               ))}
+              {summaryScores.length > 0 && (
+                <>
+                  <tr>
+                    <td
+                      colSpan={2}
+                      className="bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600"
+                    >
+                      Latest scores
+                    </td>
+                  </tr>
+                  {summaryScores.map((row) => (
+                    <tr key={row.label}>
+                      <td className="w-48 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        {row.label}
+                      </td>
+                      <td className="px-3 py-2 text-[12px] text-slate-800 break-words">{formatScoreValue(row.value)}</td>
+                    </tr>
+                  ))}
+                </>
+              )}
             </tbody>
           </table>
         </div>

@@ -17,6 +17,7 @@ import {
   fetchFmpRatiosTtm,
   fetchGlossary,
   type FundamentalRecord,
+  fetchFundamentalsHistory,
 } from "../../api/fundamentals";
 import SectionHeader from "../molecules/content/SectionHeader";
 import ReactApexChart from "react-apexcharts";
@@ -31,7 +32,7 @@ import TickerNewsTab from "./tickers/TickerNewsTab";
 import TickerChartTab from "./tickers/TickerChartTab";
 import { env } from "../../config/env";
 
-type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total" | "doubleTop";
+type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total" | "doubleTop" | "growthProbability";
 type StatementStatus = "idle" | "loading" | "error" | "no-key";
 
 const getHashSymbol = () => {
@@ -152,6 +153,9 @@ const getDoubleTopScore = (record: FundamentalRecord): number | null => {
 
 export function TickersPage() {
   const [records, setRecords] = useState<FundamentalRecord[]>([]);
+  const [historyCache, setHistoryCache] = useState<Record<string, FundamentalRecord[]>>({});
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>("today");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -222,30 +226,82 @@ export function TickersPage() {
 
   useEffect(() => {
     let active = true;
+    fetchFundamentalsHistory({ days: 120 })
+      .then(({ records: histRecords, dates }) => {
+        if (!active) return;
+        if (Array.isArray(dates)) setAvailableDates(dates);
+        if (Array.isArray(histRecords)) {
+          const grouped: Record<string, FundamentalRecord[]> = {};
+          histRecords.forEach((r: any) => {
+            const d = (r as any)?.as_of_date || (r as any)?.asOfDate;
+            if (d) {
+              grouped[d] = grouped[d] || [];
+              grouped[d].push(r);
+            }
+          });
+          setHistoryCache(grouped);
+        }
+      })
+      .catch(() => {
+        /* opzionale: silenzio, si usa solo per le date */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     setLoading(true);
     setError(null);
 
-    fetchFundamentals()
-      .then((data) => {
+    const load = async () => {
+      try {
+        if (selectedDate === "today") {
+          const data = await fetchFundamentals();
+          if (!active) return;
+          setRecords(Array.isArray(data) ? data : []);
+          return;
+        }
+
+        // prova cache
+        const cached = historyCache[selectedDate];
+        if (cached) {
+          if (!active) return;
+          setRecords(cached);
+          return;
+        }
+
+        const { records: histRecords } = await fetchFundamentalsHistory({ days: 120 });
         if (!active) return;
-        setRecords(Array.isArray(data) ? data : []);
-      })
-      .catch((err: any) => {
+        const grouped: Record<string, FundamentalRecord[]> = {};
+        histRecords.forEach((r: any) => {
+          const d = (r as any)?.as_of_date || (r as any)?.asOfDate;
+          if (d) {
+            grouped[d] = grouped[d] || [];
+            grouped[d].push(r);
+          }
+        });
+        setHistoryCache((prev) => ({ ...prev, ...grouped }));
+        setRecords(grouped[selectedDate] || []);
+      } catch (err: any) {
         if (!active) return;
         const message =
           err?.message && typeof err.message === "string"
             ? err.message
             : "Errore durante il caricamento dei ticker";
         setError(message);
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    };
+
+    load();
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => {
     const syncSymbol = () => {
@@ -694,6 +750,7 @@ export function TickersPage() {
       risk: ["risk_score"],
       valuation: ["valuation_score", "valuation_scores"],
       total: ["total_score", "score", "totalScore"],
+      growthProbability: ["growth_probability"],
       doubleTop: [],
     };
 
@@ -831,6 +888,39 @@ export function TickersPage() {
     };
   }, [parsedMomentum]);
 
+  const momentumSummary = useMemo(() => {
+    const firstNum = (...vals: unknown[]) => {
+      for (const v of vals) {
+        const n = typeof v === "number" ? v : Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+      return null;
+    };
+    const momentumShort = firstNum(
+      (selectedRecord as any)?.momentum_short_score,
+      parsedMomentum?.components?.momentumShort && (parsedMomentum.components as any).momentumShort?.score
+    );
+    const volumeScore = firstNum(
+      (selectedRecord as any)?.volume_score,
+      (selectedRecord as any)?.momentum_volume_score,
+      parsedMomentum?.components && (parsedMomentum.components as any).volume?.score
+    );
+    const shortRisk = firstNum((selectedRecord as any)?.short_risk_score);
+    const marketScore = firstNum(
+      (selectedRecord as any)?.market_score,
+      parsedMomentum?.components && (parsedMomentum.components as any).marketScore?.score
+    );
+    const growthProbability = firstNum((selectedRecord as any)?.growth_probability);
+
+    return [
+      { label: "Momentum short", value: momentumShort },
+      { label: "Volume score", value: volumeScore },
+      { label: "Risk score (short)", value: shortRisk },
+      { label: "Market score", value: marketScore },
+      { label: "Growth probability", value: growthProbability },
+    ];
+  }, [parsedMomentum, selectedRecord]);
+
   const scoreSources = useMemo(
     () => [scoreData.doc, selectedRecord].filter(Boolean),
     [scoreData.doc, selectedRecord]
@@ -856,7 +946,7 @@ export function TickersPage() {
       { label: "Quality", value: get(["quality_score", "qualityScore"]) },
       { label: "Risk", value: get(["risk_score", "riskScore"]) },
       { label: "Valuation", value: get(["valuation_score", "valuation_scores", "valuationScore"]) },
-      { label: "Total", value: get(["total_score", "score", "totalScore"]) },
+      { label: "Growth probability", value: get(["growth_probability"]) },
       { label: "Double top", value: doubleTopValue },
     ];
 
@@ -1345,7 +1435,7 @@ export function TickersPage() {
               {radarData ? (
                 <ReactApexChart
                   type="radar"
-                  height={260}
+                  height={320}
                   series={[
                     {
                       name: "Score",
@@ -1356,11 +1446,24 @@ export function TickersPage() {
                     chart: { toolbar: { show: false } },
                     dataLabels: { enabled: false },
                     stroke: { width: 2 },
-                    markers: { size: 3 },
+                    markers: { size: 4 },
                     xaxis: { categories: radarData.categories },
                     yaxis: { show: true, min: 0, max: 100 },
-                    fill: { opacity: 0.25 },
                     colors: ["#0ea5e9"],
+                    fill: {
+                      opacity: 0.45,
+                      colors: ["rgba(14,165,233,0.45)"],
+                    },
+                    plotOptions: {
+                      radar: {
+                        polygons: {
+                          strokeColors: "#e2e8f0",
+                          fill: {
+                            colors: ["#f8fafc", "#e2e8f0"],
+                          },
+                        },
+                      },
+                    },
                   }}
                 />
               ) : (
@@ -1437,7 +1540,11 @@ export function TickersPage() {
             {infoTab === "chart" && <TickerChartTab symbol={selectedSymbol} />}
 
             {infoTab === "detail" && (
-              <TickerDetailTab detailRows={detailRows} momentumComponents={momentumComponents} />
+              <TickerDetailTab
+                detailRows={detailRows}
+                momentumComponents={momentumComponents}
+                summaryScores={momentumSummary}
+              />
             )}
 
             {infoTab === "statement" && (
@@ -1583,16 +1690,17 @@ export function TickersPage() {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                  {[
-                    { key: "momentum", label: "Best Momentum" },
-                    { key: "quality", label: "Best Quality" },
-                    { key: "risk", label: "Best Risk" },
-                    { key: "valuation", label: "Best Value" },
-                    { key: "total", label: "Best General" },
-                    { key: "doubleTop", label: "Best double top score" },
-                  ].map((option) => {
-                    const active = sortKey === option.key;
-                    return (
+                {[
+                  { key: "momentum", label: "Best Momentum" },
+                  { key: "quality", label: "Best Quality" },
+                  { key: "risk", label: "Best Risk" },
+                  { key: "valuation", label: "Best Value" },
+                  { key: "growthProbability", label: "Growth Probability" },
+                  { key: "total", label: "Best General" },
+                  { key: "doubleTop", label: "Best double top score" },
+                ].map((option) => {
+                  const active = sortKey === option.key;
+                  return (
                       <button
                         key={option.key}
                       onClick={() => setSortKey(option.key as SortKey)}
@@ -1609,6 +1717,22 @@ export function TickersPage() {
               </div>
             </div>
             <div className="flex flex-wrap gap-3">
+              <label className="sr-only" htmlFor="asof-filter">
+                Seleziona giornata
+              </label>
+              <select
+                id="asof-filter"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-inner focus:border-slate-300 focus:outline-none"
+              >
+                <option value="today">Today (live)</option>
+                {availableDates.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
               <label className="sr-only" htmlFor="industry-filter">
                 Filtra per industria
               </label>
@@ -1681,8 +1805,8 @@ export function TickersPage() {
                     { label: "Quality", value: getScore("quality_score") },
                     { label: "Risk", value: getScore("risk_score") },
                     { label: "Momentum", value: getScore("momentum_score") },
+                    { label: "Growth probability", value: getScore("growth_probability") },
                     { label: "Double top", value: getDoubleTopScore(item) },
-                    { label: "Total", value: getScore("total_score", "score", "totalScore") },
                   ];
 
                   return (
