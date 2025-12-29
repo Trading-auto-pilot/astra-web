@@ -54,6 +54,10 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
       if (!dashboardChildren.some((child) => child.href === href)) {
         dashboardChildren.push({ label: "Tickers", href });
       }
+      const userHref = "#/dashboard/user_tickers";
+      if (!dashboardChildren.some((child) => child.href === userHref)) {
+        dashboardChildren.push({ label: "User Tickers", href: userHref });
+      }
       return;
     }
 

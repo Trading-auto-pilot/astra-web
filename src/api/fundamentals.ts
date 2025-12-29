@@ -43,6 +43,7 @@ const FMP_STOCK_SEARCH_ENDPOINT = "https://financialmodelingprep.com/stable/news
 const FMP_EOD_LIGHT_ENDPOINT = "https://financialmodelingprep.com/stable/historical-price-eod/light";
 const FMP_EOD_FULL_ENDPOINT = "https://financialmodelingprep.com/stable/historical-price-eod/full";
 const FMP_HISTORICAL_CHART_ENDPOINT = "https://financialmodelingprep.com/stable/historical-chart";
+const USER_FUNDAMENTALS_VIEW_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/fundamentals/user-fundamentals-view`;
 
 const parseJsonSafely = async (response: Response) => {
   const text = await response.text();
@@ -115,6 +116,28 @@ export async function fetchFundamentals(): Promise<FundamentalRecord[]> {
   if (!response.ok) {
     const message = (data as any)?.message ?? "Unable to load fundamentals";
     throw new Error(typeof message === "string" ? message : "Unable to load fundamentals");
+  }
+
+  return extractRecords(data);
+}
+
+export async function fetchUserFundamentalsView(): Promise<FundamentalRecord[]> {
+  const token =
+    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+
+  const response = await fetch(USER_FUNDAMENTALS_VIEW_ENDPOINT, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  const data = await parseJsonSafely(response);
+
+  if (!response.ok) {
+    const message = (data as any)?.message ?? "Unable to load user fundamentals";
+    throw new Error(typeof message === "string" ? message : "Unable to load user fundamentals");
   }
 
   return extractRecords(data);
