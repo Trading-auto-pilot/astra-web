@@ -180,6 +180,7 @@ export default function UserWeightsTab() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
+  const [running, setRunning] = useState(false);
 
   const token = useMemo(
     () => (typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null),
@@ -232,6 +233,28 @@ export default function UserWeightsTab() {
       setError(err?.message || "Errore durante il salvataggio");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRecalculate = async () => {
+    if (!token) return;
+    setRunning(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const resp = await fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/recalculate-user`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      setSuccess("Ricalcolo avviato");
+    } catch (err: any) {
+      setError(err?.message || "Errore durante il ricalcolo");
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -337,6 +360,13 @@ export default function UserWeightsTab() {
           onClick={applyDefaults}
         >
           Set default
+        </button>
+        <button
+          className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+          onClick={handleRecalculate}
+          disabled={running}
+        >
+          {running ? "Running..." : "Run now"}
         </button>
         <button
           className="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"

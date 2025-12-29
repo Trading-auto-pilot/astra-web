@@ -18,6 +18,7 @@ import {
   fetchGlossary,
   type FundamentalRecord,
   fetchFundamentalsHistory,
+  fetchUserFundamentalsView,
 } from "../../api/fundamentals";
 import SectionHeader from "../molecules/content/SectionHeader";
 import ReactApexChart from "react-apexcharts";
@@ -31,9 +32,13 @@ import TickerSegmentationTab from "./tickers/TickerSegmentationTab";
 import TickerNewsTab from "./tickers/TickerNewsTab";
 import TickerChartTab from "./tickers/TickerChartTab";
 import { env } from "../../config/env";
+import { useState as useStateReact } from "react";
 
 type SortKey = "momentum" | "quality" | "risk" | "valuation" | "total" | "doubleTop" | "growthProbability";
 type StatementStatus = "idle" | "loading" | "error" | "no-key";
+
+const UI_STATE_KEY = "astraai:tickers:ui";
+const SCORE_VISIBILITY_KEY = "astraai:tickers:scores";
 
 const getHashSymbol = () => {
   if (typeof window === "undefined") return null;
@@ -151,7 +156,170 @@ const getDoubleTopScore = (record: FundamentalRecord): number | null => {
   return parsed?.doubleTopScore ?? null;
 };
 
-export function TickersPage() {
+type UserFilter = { name: string; value?: number | null; comparator?: string; enabled?: boolean };
+
+const FILTER_FIELD_MAP: Record<string, string[]> = {
+  growthProbability: [
+    "user_grow_score",
+    "grow_score",
+    "growth_probability",
+    "growthProbability",
+    "user_growth_probability",
+  ],
+  growthMomentum: ["user_momentum_score", "momentum_score", "momentumScore", "user_momentum"],
+  growthRisk: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
+  growthMarket: [
+    "user_market_score",
+    "market_score",
+    "marketScore",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
+  mom1m: [
+    "user_mom1m_score",
+    "mom_1m",
+    "mom1m",
+    "momentum_1m",
+    "mom1mScore",
+    "momentum.components.mom1mScore",
+    "momentum_json.components.mom1mScore",
+  ],
+  mom3m: [
+    "user_mom3m_score",
+    "mom_3m",
+    "mom3m",
+    "momentum_3m",
+    "mom3mScore",
+    "momentum.components.mom3mScore",
+    "momentum_json.components.mom3mScore",
+  ],
+  mom6m: [
+    "user_mom6m_score",
+    "mom_6m",
+    "mom6m",
+    "momentum_6m",
+    "mom6mScore",
+    "momentum.components.mom6mScore",
+    "momentum_json.components.mom6mScore",
+  ],
+  mom12m: [
+    "user_mom12m_score",
+    "mom_12m",
+    "mom12m",
+    "momentum_12m",
+    "mom12mScore",
+    "momentum.components.mom12mScore",
+    "momentum_json.components.mom12mScore",
+  ],
+  doubletopScore: [
+    "user_double_top_score",
+    "double_top_score",
+    "doubletopScore",
+    "momentum.components.doubleTop.score",
+    "momentum_json.components.doubleTop.score",
+  ],
+};
+
+const ORDER_FIELD_MAP: Record<string, string[]> = {
+  growth_probability: ["user_grow_score", "grow_score", "growth_probability"],
+  momentum_score: ["user_momentum_score", "momentum_score"],
+  risk_score: ["user_risk_score", "risk_score"],
+  market_score: [
+    "user_market_score",
+    "market_score",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
+  mom1mScore: [
+    "user_mom1m_score",
+    "mom_1m",
+    "mom1m",
+    "momentum.components.mom1mScore",
+    "momentum_json.components.mom1mScore",
+  ],
+  mom3mScore: [
+    "user_mom3m_score",
+    "mom_3m",
+    "mom3m",
+    "momentum.components.mom3mScore",
+    "momentum_json.components.mom3mScore",
+  ],
+  mom6mScore: [
+    "user_mom6m_score",
+    "mom_6m",
+    "mom6m",
+    "momentum.components.mom6mScore",
+    "momentum_json.components.mom6mScore",
+  ],
+  mom12mScore: [
+    "user_mom12m_score",
+    "mom_12m",
+    "mom12m",
+    "momentum.components.mom12mScore",
+    "momentum_json.components.mom12mScore",
+  ],
+  double_top_score: [
+    "user_double_top_score",
+    "double_top_score",
+    "momentum.components.doubleTop.score",
+    "momentum_json.components.doubleTop.score",
+  ],
+};
+
+const getNumericField = (record: any, keys: string[]): number | null => {
+  const getByPath = (obj: any, path: string) => {
+    if (!obj || typeof obj !== "object") return undefined;
+    const parts = path.split(".");
+    let cur = obj;
+    for (const p of parts) {
+      if (cur && typeof cur === "object" && p in cur) {
+        cur = cur[p];
+      } else {
+        return undefined;
+      }
+    }
+    return cur;
+  };
+
+  for (const k of keys) {
+    let v: any;
+    if (k.includes(".")) {
+      v = getByPath(record, k);
+    } else if (k in record) {
+      v = record[k];
+    }
+    if (v === undefined) continue;
+    const num = typeof v === "string" ? Number(v) : (v as number);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+};
+
+const applyUserFilters = (records: FundamentalRecord[], filters: UserFilter[]) => {
+  if (!Array.isArray(filters) || !filters.length) return records;
+  return records.filter((rec) => {
+    for (const f of filters) {
+      if (!f?.enabled) continue;
+      const targetKeys = FILTER_FIELD_MAP[f.name] || [];
+      if (!targetKeys.length) continue;
+      const recVal = getNumericField(rec as any, targetKeys);
+      // se il valore non è disponibile, il filtro non è soddisfatto
+      if (recVal === null) return false;
+      const filterVal = Number(f.value);
+      if (!Number.isFinite(filterVal)) continue;
+      const cmp = (f.comparator || "GT").toUpperCase() === "LT" ? "LT" : "GT";
+      if (cmp === "GT" && !(recVal >= filterVal)) return false;
+      if (cmp === "LT" && !(recVal <= filterVal)) return false;
+    }
+    return true;
+  });
+};
+
+export type TickersPageProps = {
+  useUserFundamentals?: boolean;
+};
+
+export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const [records, setRecords] = useState<FundamentalRecord[]>([]);
   const [historyCache, setHistoryCache] = useState<Record<string, FundamentalRecord[]>>({});
   const [availableDates, setAvailableDates] = useState<string[]>([]);
@@ -198,6 +366,140 @@ export function TickersPage() {
     keyMetricsTtm: { docs: [], status: "idle" },
     ratiosTtm: { docs: [], status: "idle" },
   });
+  const [uiRestored, setUiRestored] = useState(false);
+  const [userFilters, setUserFilters] = useState<UserFilter[]>([]);
+  const [userOrder, setUserOrder] = useState<{ field: string; direction: "ASC" | "DESC"; order_id?: number }[]>([]);
+  const [showRadar, setShowRadar] = useState(true);
+  const [showGrow, setShowGrow] = useState(true);
+  const [showMomentum, setShowMomentum] = useState(true);
+  const [showRisk, setShowRisk] = useState(true);
+  const [showMarket, setShowMarket] = useState(true);
+  const [showMom1, setShowMom1] = useState(true);
+  const [showMom3, setShowMom3] = useState(true);
+  const [showMom6, setShowMom6] = useState(true);
+  const [showMom12, setShowMom12] = useState(true);
+  const [showDoubleTop, setShowDoubleTop] = useState(true);
+  const [scoreMenuOpen, setScoreMenuOpen] = useStateReact(false);
+  const [scoreMenuAnchor, setScoreMenuAnchor] = useStateReact<{ x: number; y: number } | null>(null);
+  const [orderMenuOpen, setOrderMenuOpen] = useStateReact(false);
+  const [orderMenuAnchor, setOrderMenuAnchor] = useStateReact<{ x: number; y: number } | null>(null);
+  const [scoresLoaded, setScoresLoaded] = useState(false);
+  const buildScoreVisibility = () => ({
+    radar: showRadar,
+    grow: showGrow,
+    momentum: showMomentum,
+    risk: showRisk,
+    market: showMarket,
+    mom1: showMom1,
+    mom3: showMom3,
+    mom6: showMom6,
+    mom12: showMom12,
+    doubleTop: showDoubleTop,
+  });
+  const persistScoreVisibility = (state: ReturnType<typeof buildScoreVisibility>) => {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(SCORE_VISIBILITY_KEY, JSON.stringify(state));
+    } catch {
+      // ignore
+    }
+  };
+
+  // Ripristina l'UI (filtro/ordinamento) se salvata in precedenza.
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    try {
+      const raw = localStorage.getItem(UI_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<{
+          selectedDate: string;
+          searchTerm: string;
+          selectedIndustry: string;
+          selectedCountry: string;
+          sortKey: SortKey;
+        }>;
+        if (parsed.selectedDate) setSelectedDate(parsed.selectedDate);
+        if (parsed.searchTerm !== undefined) setSearchTerm(parsed.searchTerm);
+        if (parsed.selectedIndustry !== undefined) setSelectedIndustry(parsed.selectedIndustry);
+        if (parsed.selectedCountry !== undefined) setSelectedCountry(parsed.selectedCountry);
+        if (parsed.sortKey) setSortKey(parsed.sortKey);
+      }
+    } catch {
+      // ignora errori di parsing
+    } finally {
+      setUiRestored(true);
+    }
+  }, []);
+
+  // Carica preferenze visibilità score
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    try {
+      const raw = localStorage.getItem(SCORE_VISIBILITY_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<{
+          radar: boolean;
+          grow: boolean;
+          momentum: boolean;
+          risk: boolean;
+          market: boolean;
+          mom1: boolean;
+          mom3: boolean;
+          mom6: boolean;
+          mom12: boolean;
+        }>;
+        if (typeof parsed.radar === "boolean") setShowRadar(parsed.radar);
+        if (typeof parsed.grow === "boolean") setShowGrow(parsed.grow);
+        if (typeof parsed.momentum === "boolean") setShowMomentum(parsed.momentum);
+        if (typeof parsed.risk === "boolean") setShowRisk(parsed.risk);
+        if (typeof parsed.market === "boolean") setShowMarket(parsed.market);
+        if (typeof parsed.mom1 === "boolean") setShowMom1(parsed.mom1);
+        if (typeof parsed.mom3 === "boolean") setShowMom3(parsed.mom3);
+        if (typeof parsed.mom6 === "boolean") setShowMom6(parsed.mom6);
+        if (typeof parsed.mom12 === "boolean") setShowMom12(parsed.mom12);
+        if (typeof parsed.doubleTop === "boolean") setShowDoubleTop(parsed.doubleTop);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setScoresLoaded(true);
+    }
+  }, []);
+
+  // Salva preferenze visibilità score
+  useEffect(() => {
+    if (!scoresLoaded || typeof localStorage === "undefined") return;
+    persistScoreVisibility(buildScoreVisibility());
+  }, [
+    scoresLoaded,
+    showRadar,
+    showGrow,
+    showMomentum,
+    showRisk,
+    showMarket,
+    showMom1,
+    showMom3,
+    showMom6,
+    showMom12,
+    showDoubleTop,
+  ]);
+
+  // Persiste le preferenze di vista per tornare alla lista con gli stessi filtri.
+  useEffect(() => {
+    if (typeof localStorage === "undefined" || !uiRestored) return;
+    const payload = {
+      selectedDate,
+      searchTerm,
+      selectedIndustry,
+      selectedCountry,
+      sortKey,
+    };
+    try {
+      localStorage.setItem(UI_STATE_KEY, JSON.stringify(payload));
+    } catch {
+      // best-effort
+    }
+  }, [selectedDate, searchTerm, selectedIndustry, selectedCountry, sortKey, uiRestored]);
   const [scoreData, setScoreData] = useState<{ doc: any | null; status: StatementStatus }>({
     doc: null,
     status: "idle",
@@ -225,6 +527,10 @@ export function TickersPage() {
   });
 
   useEffect(() => {
+    if (useUserFundamentals) {
+      setAvailableDates(["today"]);
+      return;
+    }
     let active = true;
     fetchFundamentalsHistory({ days: 120 })
       .then(({ records: histRecords, dates }) => {
@@ -248,7 +554,7 @@ export function TickersPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [useUserFundamentals]);
 
   useEffect(() => {
     let active = true;
@@ -257,6 +563,13 @@ export function TickersPage() {
 
     const load = async () => {
       try {
+        if (useUserFundamentals) {
+          const data = await fetchUserFundamentalsView();
+          if (!active) return;
+          setRecords(Array.isArray(data) ? data : []);
+          return;
+        }
+
         if (selectedDate === "today") {
           const data = await fetchFundamentals();
           if (!active) return;
@@ -301,7 +614,7 @@ export function TickersPage() {
     return () => {
       active = false;
     };
-  }, [selectedDate]);
+  }, [selectedDate, useUserFundamentals, historyCache]);
 
   useEffect(() => {
     const syncSymbol = () => {
@@ -310,6 +623,81 @@ export function TickersPage() {
     window.addEventListener("hashchange", syncSymbol);
     return () => window.removeEventListener("hashchange", syncSymbol);
   }, []);
+
+  useEffect(() => {
+    if (!useUserFundamentals) return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    if (!token) {
+      setUserFilters([]);
+      setUserOrder([]);
+      return;
+    }
+    let active = true;
+    fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((resp) => resp.json())
+      .then((data) => {
+        if (!active) return;
+        const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+        // Usa solo i filtri implementati al momento
+        const allowed = new Set([
+          "growthProbability",
+          "growthMomentum",
+          "growthRisk",
+          "growthMarket",
+          "mom1m",
+          "mom3m",
+          "mom6m",
+          "mom12m",
+          "doubletopScore",
+        ]);
+        const filtered = rows.filter((r: any) => allowed.has(r.filter_name || r.name));
+        setUserFilters(
+          filtered.map((r: any) => ({
+            name: r.filter_name || r.name,
+            value: Number(r.value),
+            comparator: r.comparator || r.comp,
+            enabled: r.enabled === 1 || r.enabled === true || r.enabled === "1",
+          }))
+        );
+      })
+      .catch(() => {
+        if (active) {
+          setUserFilters([]);
+          setUserOrder([]);
+        }
+      });
+
+    fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-order`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((resp) => resp.json())
+      .then((data) => {
+        if (!active) return;
+        const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+        const parsed = rows
+          .map((r: any) => ({
+            field: r.field || r.order_field || r.name,
+            direction: (r.direction || r.dir || "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC",
+            order_id: Number.isFinite(Number(r.order_id)) ? Number(r.order_id) : 1,
+          }))
+          .filter((r) => r.field)
+          .sort((a, b) => (a.order_id || 0) - (b.order_id || 0));
+        setUserOrder(parsed);
+      })
+      .catch(() => {
+        if (active) setUserOrder([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [useUserFundamentals]);
+
+  const viewRecords = useMemo(
+    () => (useUserFundamentals ? applyUserFilters(records, userFilters) : records),
+    [records, useUserFundamentals, userFilters]
+  );
 
   useEffect(() => {
     if (!selectedSymbol) {
@@ -337,12 +725,12 @@ export function TickersPage() {
       });
       return;
     }
-    const found = records.find((item) => {
+    const found = viewRecords.find((item) => {
       const symbol = (item as any).ticker || (item as any).symbol;
       return typeof symbol === "string" && symbol.toUpperCase() === selectedSymbol.toUpperCase();
     });
     setSelectedRecord(found ?? null);
-  }, [records, selectedSymbol]);
+  }, [viewRecords, selectedSymbol]);
 
   useEffect(() => {
     if (!selectedSymbol) return;
@@ -720,19 +1108,19 @@ export function TickersPage() {
 
   const industryOptions = useMemo(() => {
     const set = new Set<string>();
-    records.forEach((item) => {
+    viewRecords.forEach((item) => {
       const value = (item as any).industry;
       if (value && typeof value === "string") {
         set.add(value);
       }
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [records]);
+  }, [viewRecords]);
 
   const countryOptions = useMemo(() => {
     const agg = ["Europe", "Asia", "Latam"];
     const set = new Set<string>(agg);
-    records.forEach((item) => {
+    viewRecords.forEach((item) => {
       const value = (item as any).country;
       if (value && typeof value === "string") {
         set.add(value);
@@ -741,7 +1129,7 @@ export function TickersPage() {
     const sorted = Array.from(set).sort((a, b) => a.localeCompare(b));
     const base = sorted.filter((val) => !agg.includes(val));
     return [...agg, ...base];
-  }, [records]);
+  }, [viewRecords]);
 
   const topRows = useMemo(() => {
     const scoreKeyMap: Record<SortKey, string[]> = {
@@ -758,11 +1146,11 @@ export function TickersPage() {
     const term = searchTerm.trim().toLowerCase();
 
     const filteredRecords = term
-      ? records.filter((item) => {
+      ? viewRecords.filter((item) => {
           const symbol = ((item as any).ticker ?? (item as any).symbol ?? "").toString().toLowerCase();
           return symbol.includes(term);
         })
-      : records;
+      : viewRecords;
 
     const normalizeCountry = (value: string) => value.trim().toUpperCase();
     const regionGroups: Record<string, Set<string>> = {
@@ -824,26 +1212,69 @@ export function TickersPage() {
       return null;
     };
 
-    const sorted = [...countryFiltered].sort((a, b) => {
-      if (sortKey === "doubleTop") {
-        const aScore = getDoubleTopScore(a);
-        const bScore = getDoubleTopScore(b);
+    const sorted = [...countryFiltered];
+
+    if (useUserFundamentals && userOrder.length) {
+      sorted.sort((a, b) => {
+        for (const ord of userOrder) {
+          const mappedKeys = ORDER_FIELD_MAP[ord.field] || [ord.field];
+          const valA = getNumericField(a as any, mappedKeys);
+          const valB = getNumericField(b as any, mappedKeys);
+          const dir = ord.direction === "ASC" ? 1 : -1;
+          if (valA === null && valB === null) continue;
+          if (valA === null) return 1; // nulls last
+          if (valB === null) return -1;
+          if (valA !== valB) return (valA - valB) * dir;
+        }
+        return 0;
+      });
+    } else {
+      sorted.sort((a, b) => {
+        if (sortKey === "doubleTop") {
+          const aScore = getDoubleTopScore(a);
+          const bScore = getDoubleTopScore(b);
+          if (aScore === null && bScore === null) return 0;
+          if (aScore === null) return 1;
+          if (bScore === null) return -1;
+          return bScore - aScore;
+        }
+
+        const aScore = getScore(a, keys);
+        const bScore = getScore(b, keys);
         if (aScore === null && bScore === null) return 0;
         if (aScore === null) return 1;
         if (bScore === null) return -1;
         return bScore - aScore;
-      }
-
-      const aScore = getScore(a, keys);
-      const bScore = getScore(b, keys);
-      if (aScore === null && bScore === null) return 0;
-      if (aScore === null) return 1;
-      if (bScore === null) return -1;
-      return bScore - aScore;
-    });
+      });
+    }
 
     return sorted.slice(0, 50);
-  }, [records, sortKey, searchTerm, selectedIndustry, selectedCountry]);
+  }, [viewRecords, sortKey, searchTerm, selectedIndustry, selectedCountry, useUserFundamentals, userOrder]);
+
+  const recordsCount = useMemo(() => viewRecords.length, [viewRecords]);
+
+  const renderScoreBar = (val: number | null) => {
+    if (val === null || val === undefined || Number.isNaN(val)) return <span className="text-slate-400">-</span>;
+    const color =
+      val < 20
+        ? "bg-red-500"
+        : val < 40
+          ? "bg-orange-500"
+          : val < 60
+            ? "bg-yellow-400"
+            : val < 80
+              ? "bg-lime-400"
+              : "bg-green-500";
+    const width = `${Math.max(0, Math.min(100, val))}%`;
+    return (
+      <>
+        <div className="h-2 w-28 rounded-full bg-slate-200">
+          <div className={`h-2 rounded-full ${color}`} style={{ width }} />
+        </div>
+        <span className="text-slate-900">{val}</span>
+      </>
+    );
+  };
 
   const parsedMomentum = useMemo<ParsedMomentum | null>(() => {
     if (!selectedRecord) return null;
@@ -1767,9 +2198,21 @@ export function TickersPage() {
                   </option>
                 ))}
               </select>
+              <div className="flex items-center text-sm text-slate-600">
+                {useUserFundamentals ? "User tickers" : "Tickers"}: {recordsCount}
+              </div>
             </div>
           </div>
         </div>
+        {useUserFundamentals && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+            Sono attivi gli User Filters. Puoi modificarli in{" "}
+            <a href="#/dashboard/user-settings?tab=filters" className="font-semibold underline">
+              Dashboard / User Settings / Filters
+            </a>
+            .
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center px-6 py-10 text-sm text-slate-500">
             Caricamento in corso...
@@ -1781,13 +2224,200 @@ export function TickersPage() {
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">Ticker</th>
-                  <th className="px-4 py-3 font-semibold">Settore</th>
-                  <th className="px-4 py-3 font-semibold">Industria</th>
-                  <th className="px-4 py-3 font-semibold">Paese</th>
-                  <th className="px-4 py-3 font-semibold">Scores</th>
-                </tr>
-              </thead>
+              <th className="px-4 py-3 font-semibold">Ticker</th>
+              <th className="px-4 py-3 font-semibold">Settore</th>
+              <th className="px-4 py-3 font-semibold">Industria</th>
+              <th className="px-4 py-3 font-semibold">Paese</th>
+              <th className="px-4 py-3 font-semibold">
+                <div className="flex items-center justify-between gap-2">
+                  <span>Scores</span>
+                  <div className="flex items-center gap-2">
+                    {useUserFundamentals && userOrder.length > 0 && (
+                      <div className="relative inline-block">
+                        <button
+                          type="button"
+                          className="rounded-full p-2 text-slate-600 hover:bg-slate-100"
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setOrderMenuAnchor({ x: rect.right, y: rect.bottom });
+                            setOrderMenuOpen((v) => !v);
+                          }}
+                          aria-label="Visualizza ordinamento"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M3 4a1 1 0 011-1h10a1 1 0 110 2H4a1 1 0 01-1-1zM3 9a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1zM3 14a1 1 0 011-1h3a1 1 0 110 2H4a1 1 0 01-1-1z" />
+                          </svg>
+                        </button>
+                        {orderMenuOpen && (
+                          <div
+                            className="absolute right-0 z-10 mt-2 w-40 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5"
+                            onMouseLeave={() => setOrderMenuOpen(false)}
+                          >
+                            <div className="p-2 text-xs text-slate-700 space-y-1">
+                              {userOrder.map((o, i) => (
+                                <div key={`${o.field}-${i}`} className="flex items-center gap-2">
+                                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300">
+                                    {o.direction === "DESC" ? "↓" : "↑"}
+                                  </span>
+                                  <span className="truncate">{o.field}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="relative inline-block text-left">
+                      <button
+                        type="button"
+                        className="rounded-full p-2 text-slate-600 hover:bg-slate-100"
+                        onClick={(e) => {
+                          setScoreMenuOpen((v) => !v);
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setScoreMenuAnchor({ x: rect.right, y: rect.bottom });
+                        }}
+                        aria-label="Seleziona colonne scores"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                      </button>
+                      {scoreMenuOpen && (
+                        <div
+                          className="absolute right-0 z-10 mt-2 w-36 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                          style={scoreMenuAnchor ? { left: "auto", right: 0 } : undefined}
+                          onMouseLeave={() => setScoreMenuOpen(false)}
+                        >
+                          <div className="p-2 text-xs text-slate-700 space-y-1">
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showRadar}
+                                onChange={(e) => {
+                                  setShowRadar(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), radar: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Radar</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showGrow}
+                                onChange={(e) => {
+                                  setShowGrow(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), grow: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Growth Probability</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMomentum}
+                                onChange={(e) => {
+                                  setShowMomentum(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), momentum: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Growth Momentum</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showRisk}
+                                onChange={(e) => {
+                                  setShowRisk(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), risk: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Growth Risk</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMarket}
+                                onChange={(e) => {
+                                  setShowMarket(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), market: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Growth Market</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMom1}
+                                onChange={(e) => {
+                                  setShowMom1(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), mom1: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Mom 1M</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMom3}
+                                onChange={(e) => {
+                                  setShowMom3(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), mom3: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Mom 3M</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMom6}
+                                onChange={(e) => {
+                                  setShowMom6(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), mom6: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Mom 6M</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMom12}
+                                onChange={(e) => {
+                                  setShowMom12(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), mom12: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Mom 12M</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showDoubleTop}
+                                onChange={(e) => {
+                                  setShowDoubleTop(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), doubleTop: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Double Top</span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </th>
+            </tr>
+          </thead>
               <tbody className="divide-y divide-slate-100 text-slate-800">
                 {topRows.map((item, idx) => {
                   const symbol = item.ticker || item.symbol || "-";
@@ -1800,14 +2430,24 @@ export function TickersPage() {
                     return null;
                   };
 
-                  const scoreBadges = [
-                    { label: "Valuation", value: getScore("valuation_score", "valuation_scores") },
-                    { label: "Quality", value: getScore("quality_score") },
-                    { label: "Risk", value: getScore("risk_score") },
-                    { label: "Momentum", value: getScore("momentum_score") },
-                    { label: "Growth probability", value: getScore("growth_probability") },
-                    { label: "Double top", value: getDoubleTopScore(item) },
-                  ];
+                  const rowRadar = (() => {
+                    const entries = [
+                      { label: "Momentum", value: getScore("user_momentum_score", "momentum_score") },
+                      { label: "Quality", value: getScore("user_quality_score", "quality_score") },
+                      { label: "Risk", value: getScore("user_risk_score", "risk_score") },
+                      { label: "Valuation", value: getScore("user_valuation_score", "valuation_score", "valuation_scores") },
+                      { label: "Growth probability", value: getScore("user_grow_score", "growth_probability") },
+                      { label: "Double top", value: getScore("user_double_top_score") ?? getDoubleTopScore(item) },
+                    ]
+                      .map((m) => ({ ...m, value: parseScore(m.value) }))
+                      .filter((m) => m.value !== null) as { label: string; value: number }[];
+
+                    if (!entries.length) return null;
+                    return {
+                      categories: entries.map((m) => m.label),
+                      values: entries.map((m) => m.value),
+                    };
+                  })();
 
                   return (
                     <tr
@@ -1840,32 +2480,188 @@ export function TickersPage() {
                       <td className="px-4 py-3">{item.industry || "-"}</td>
                       <td className="px-4 py-3">{(item as any).country || "-"}</td>
                       <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-3">
-                          {scoreBadges.map((score) => {
-                            const scoreValue = parseScore(score.value);
-                            const displayValue =
-                              scoreValue !== null ? `${scoreValue.toFixed(1)}%` : "-";
-                            const color = scoreValue !== null ? getScoreColor(scoreValue) : null;
-
-                            return (
-                              <div key={score.label} className="w-48 min-w-[10rem] space-y-1">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="text-slate-500">{score.label}</span>
-                                  <span className={`tabular-nums font-semibold ${color?.text ?? "text-slate-700"}`}>
-                                    {displayValue}
-                                  </span>
-                                </div>
-                                <div className="h-2 rounded-full bg-slate-100">
-                                  <div
-                                    className={`h-full rounded-full transition-all duration-200 ${color?.bar ?? "bg-slate-300"}`}
-                                    style={{ width: `${scoreValue ?? 0}%` }}
-                                  />
-                                </div>
+                        <div className="flex items-center gap-4">
+                          {showRadar && rowRadar ? (
+                            <div className="min-w-[200px] max-w-[220px]">
+                              <ReactApexChart
+                                type="radar"
+                                height={160}
+                                series={[
+                                  {
+                                    name: "Score",
+                                    data: rowRadar.values,
+                                  },
+                                ]}
+                                options={{
+                                  chart: { toolbar: { show: false }, sparkline: { enabled: true } },
+                                  dataLabels: { enabled: false },
+                                  stroke: { width: 2 },
+                                  markers: { size: 2 },
+                                  xaxis: {
+                                    categories: rowRadar.categories,
+                                    labels: {
+                                      style: {
+                                        colors: rowRadar.categories.map(() => "#475569"),
+                                        fontSize: "10px",
+                                      },
+                                    },
+                                  },
+                                  yaxis: { show: false, min: 0, max: 100 },
+                                  colors: ["#0ea5e9"],
+                                  fill: { opacity: 0.35, colors: ["rgba(14,165,233,0.35)"] },
+                                  plotOptions: {
+                                    radar: {
+                                      polygons: {
+                                        strokeColors: "#e2e8f0",
+                                        fill: { colors: ["#f8fafc", "#e2e8f0"] },
+                                      },
+                                    },
+                                  },
+                                  legend: { show: false },
+                                  grid: { show: false },
+                                }}
+                              />
+                            </div>
+                          ) : null}
+                          <div className="flex flex-col gap-2 text-xs text-slate-700">
+                          {showGrow && (
+                            <div>
+                              <span className="font-semibold">Growth Probability</span>
+                              <div className="mt-1 flex items-center gap-2">
+                                {renderScoreBar(
+                                  parseScore(
+                                    (item as any).user_grow_score ??
+                                      (item as any).grow_score ??
+                                      (item as any).growth_probability
+                                  )
+                                )}
                               </div>
-                            );
-                          })}
+                            </div>
+                          )}
+                          {showMomentum && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Momentum</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_momentum_score ??
+                                    (item as any).momentum_score ??
+                                    (item as any).momentumShortScore
+                                )
+                              )}
+                            </div>
+                          )}
+                          {showRisk && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Risk</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_risk_score ??
+                                    (item as any).risk_score ??
+                                    (item as any).short_risk_score
+                                )
+                              )}
+                            </div>
+                          )}
+                          {showMarket && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Market</span>
+                              {renderScoreBar(
+                                (() => {
+                                const fromMomentum =
+                                    parseScore(
+                                      (item as any)?.momentum_json?.components?.marketRisk?.score ??
+                                        (item as any)?.momentum?.components?.marketRisk?.score
+                                    ) ?? null;
+                                  const val =
+                                    parseScore((item as any).user_market_score ?? (item as any).market_score) ??
+                                    fromMomentum;
+                                  return val;
+                                })()
+                              )}
+                            </div>
+                          )}
+                          {showMom1 && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Mom 1M</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_mom1m_score ??
+                                      (item as any).mom_1m ??
+                                      (item as any).mom1m ??
+                                      (item as any)?.momentum_json?.components?.mom1mScore ??
+                                      (item as any)?.momentum?.components?.mom1mScore
+                                  )
+                                )}
+                              </div>
+                          )}
+                          {showMom3 && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Mom 3M</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_mom3m_score ??
+                                    (item as any).mom_3m ??
+                                    (item as any).mom3m ??
+                                    (item as any)?.momentum_json?.components?.mom3mScore ??
+                                    (item as any)?.momentum?.components?.mom3mScore
+                                )
+                                )}
+                              </div>
+                          )}
+                          {showMom6 && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Mom 6M</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_mom6m_score ??
+                                    (item as any).mom_6m ??
+                                    (item as any).mom6m ??
+                                    (item as any)?.momentum_json?.components?.mom6mScore ??
+                                    (item as any)?.momentum?.components?.mom6mScore
+                                )
+                                )}
+                              </div>
+                          )}
+                          {showMom12 && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Mom 12M</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_mom12m_score ??
+                                    (item as any).mom_12m ??
+                                    (item as any).mom12m ??
+                                    (item as any)?.momentum_json?.components?.mom12mScore ??
+                                    (item as any)?.momentum?.components?.mom12mScore
+                                )
+                                )}
+                              </div>
+                          )}
+                          {showDoubleTop && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Double Top</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_double_top_score ??
+                                    (item as any).double_top_score ??
+                                    (item as any)?.momentum_json?.components?.doubleTop?.score ??
+                                    (item as any)?.momentum?.components?.doubleTop?.score
+                                )
+                              )}
+                            </div>
+                          )}
+                          {!showRadar &&
+                            !showGrow &&
+                            !showMomentum &&
+                            !showRisk &&
+                            !showMarket &&
+                            !showMom1 &&
+                            !showMom3 &&
+                            !showMom6 &&
+                            !showMom12 &&
+                            !showDoubleTop && <span className="text-xs text-slate-500">-</span>}
                         </div>
-                      </td>
+                      </div>
+                    </td>
                     </tr>
                   );
                 })}

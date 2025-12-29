@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import SectionHeader from "../molecules/content/SectionHeader";
 import UserGeneralTab from "./user-settings/UserGeneralTab";
 import UserWeightsTab from "./user-settings/UserWeightsTab";
 import UserFiltersTab from "./user-settings/UserFiltersTab";
+import UserOrderByTab from "./user-settings/UserOrderByTab";
 
-type TabKey = "general" | "weights" | "filters";
+type TabKey = "general" | "weights" | "filters" | "orderby";
 
 type TabDef = {
   key: TabKey;
@@ -15,10 +16,31 @@ const TABS: TabDef[] = [
   { key: "general", label: "General" },
   { key: "weights", label: "Scores weighted" },
   { key: "filters", label: "Filters" },
+  { key: "orderby", label: "Order By" },
 ];
 
+const getTabFromHash = (): TabKey => {
+  if (typeof window === "undefined") return "weights";
+  const hash = window.location.hash || "";
+  const [, queryString] = hash.split("?");
+  if (queryString) {
+    const params = new URLSearchParams(queryString);
+    const tabParam = params.get("tab");
+    if (tabParam && ["general", "weights", "filters"].includes(tabParam)) {
+      return tabParam as TabKey;
+    }
+  }
+  return "weights";
+};
+
 export default function UserSettingsPage() {
-  const [activeTab, setActiveTab] = useState<TabKey>("weights");
+  const [activeTab, setActiveTab] = useState<TabKey>(() => getTabFromHash());
+
+  useEffect(() => {
+    const syncTab = () => setActiveTab(getTabFromHash());
+    window.addEventListener("hashchange", syncTab);
+    return () => window.removeEventListener("hashchange", syncTab);
+  }, []);
 
   const renderTab = () => {
     switch (activeTab) {
@@ -28,6 +50,8 @@ export default function UserSettingsPage() {
         return <UserWeightsTab />;
       case "filters":
         return <UserFiltersTab />;
+      case "orderby":
+        return <UserOrderByTab />;
       default:
         return null;
     }

@@ -6,6 +6,7 @@ import AppIcon from "../atoms/icon/AppIcon";
 import ChartLegend from "../molecules/charts/ChartLegend";
 import ECharts from "../molecules/charts/ECharts";
 import TickersPage from "./TickersPage";
+import UserTickersPage from "./UserTickersPage";
 import UsersPage from "./UsersPage";
 import SchedulerPage from "./SchedulerPage";
 import ApiKeysPage from "./ApiKeysPage";
@@ -35,7 +36,15 @@ export type DashboardPageProps = {
   extraContent?: ReactNode;
 };
 
-type AppSection = "overview" | "tickers" | "users" | "scheduler" | "apiKeys" | "microservice" | "userSettings";
+type AppSection =
+  | "overview"
+  | "tickers"
+  | "userTickers"
+  | "users"
+  | "scheduler"
+  | "apiKeys"
+  | "microservice"
+  | "userSettings";
 
 const getAppSection = (): AppSection => {
   if (typeof window === "undefined") return "overview";
@@ -46,6 +55,7 @@ const getAppSection = (): AppSection => {
 
   if (parts[0] === "dashboard") {
     if (parts[1] === "tickers") return "tickers";
+    if (parts[1] === "user_tickers" || parts[1] === "user-tickers") return "userTickers";
     if (parts[1] === "user-settings") return "userSettings";
     return "overview";
   }
@@ -75,6 +85,14 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <TickersPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "userTickers") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <UserTickersPage />
       </DashboardLayout>
     );
   }
