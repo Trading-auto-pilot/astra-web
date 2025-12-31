@@ -59,14 +59,6 @@ const parseScore = (value: unknown): number | null => {
   return clampScore(parsed);
 };
 
-const getScoreColor = (value: number) => {
-  if (value < 20) return { bar: "bg-red-500", text: "text-red-600" };
-  if (value < 40) return { bar: "bg-orange-500", text: "text-orange-600" };
-  if (value < 60) return { bar: "bg-amber-400", text: "text-amber-600" };
-  if (value < 80) return { bar: "bg-blue-500", text: "text-blue-600" };
-  return { bar: "bg-green-500", text: "text-green-600" };
-};
-
 const formatNumber = (value: number | null) => {
   if (value === null || Number.isNaN(value)) return "-";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
@@ -324,6 +316,8 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const [historyCache, setHistoryCache] = useState<Record<string, FundamentalRecord[]>>({});
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("today");
+  const [pipes, setPipes] = useState<Array<{ id: number; name?: string; enabled?: boolean }>>([]);
+  const [selectedPipeId, setSelectedPipeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -382,7 +376,6 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const [scoreMenuOpen, setScoreMenuOpen] = useStateReact(false);
   const [scoreMenuAnchor, setScoreMenuAnchor] = useStateReact<{ x: number; y: number } | null>(null);
   const [orderMenuOpen, setOrderMenuOpen] = useStateReact(false);
-  const [orderMenuAnchor, setOrderMenuAnchor] = useStateReact<{ x: number; y: number } | null>(null);
   const [scoresLoaded, setScoresLoaded] = useState(false);
   const buildScoreVisibility = () => ({
     radar: showRadar,
@@ -447,6 +440,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
           mom3: boolean;
           mom6: boolean;
           mom12: boolean;
+          doubleTop: boolean;
         }>;
         if (typeof parsed.radar === "boolean") setShowRadar(parsed.radar);
         if (typeof parsed.grow === "boolean") setShowGrow(parsed.grow);
@@ -625,22 +619,75 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   }, []);
 
   useEffect(() => {
-    if (!useUserFundamentals) return;
+    if (!useUserFundamentals) {
+      setPipes([]);
+      setSelectedPipeId(null);
+      setUserFilters([]);
+      setUserOrder([]);
+      return;
+    }
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     if (!token) {
+      setPipes([]);
+      setSelectedPipeId(null);
+      setUserFilters([]);
+      setUserOrder([]);
+      return;
+    }
+
+    let active = true;
+
+    const loadPipes = async () => {
+      try {
+        const resp = await fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/users/pipes`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!active) return;
+        const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+        const enabled = list.filter((p: any) => p?.enabled === true || p?.enabled === 1 || p?.enabled === "1");
+        setPipes(enabled);
+        if (!enabled.length) {
+          setSelectedPipeId(null);
+          setUserFilters([]);
+          setUserOrder([]);
+        } else if (selectedPipeId === null || !enabled.find((p: any) => p.id === selectedPipeId)) {
+          setSelectedPipeId(enabled[0].id);
+        }
+      } catch {
+        if (active) {
+          setPipes([]);
+          setSelectedPipeId(null);
+          setUserFilters([]);
+          setUserOrder([]);
+        }
+      }
+    };
+
+    loadPipes();
+
+    return () => {
+      active = false;
+    };
+  }, [useUserFundamentals, selectedPipeId]);
+
+  useEffect(() => {
+    if (!useUserFundamentals) return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    if (!token || selectedPipeId === null) {
       setUserFilters([]);
       setUserOrder([]);
       return;
     }
     let active = true;
-    fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters`, {
+
+    fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters/${encodeURIComponent(selectedPipeId)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((resp) => resp.json())
       .then((data) => {
         if (!active) return;
         const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
-        // Usa solo i filtri implementati al momento
         const allowed = new Set([
           "growthProbability",
           "growthMomentum",
@@ -657,7 +704,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
           filtered.map((r: any) => ({
             name: r.filter_name || r.name,
             value: Number(r.value),
-            comparator: r.comparator || r.comp,
+            comparator: (r.comparator || r.comp || "GT").toUpperCase(),
             enabled: r.enabled === 1 || r.enabled === true || r.enabled === "1",
           }))
         );
@@ -665,11 +712,10 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
       .catch(() => {
         if (active) {
           setUserFilters([]);
-          setUserOrder([]);
         }
       });
 
-    fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-order`, {
+    fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-order/${encodeURIComponent(selectedPipeId)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((resp) => resp.json())
@@ -682,17 +728,18 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
             direction: (r.direction || r.dir || "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC",
             order_id: Number.isFinite(Number(r.order_id)) ? Number(r.order_id) : 1,
           }))
-          .filter((r) => r.field)
-          .sort((a, b) => (a.order_id || 0) - (b.order_id || 0));
+          .filter((r: { field: unknown }) => Boolean(r.field))
+          .sort((a: { order_id?: number }, b: { order_id?: number }) => (a.order_id || 0) - (b.order_id || 0));
         setUserOrder(parsed);
       })
       .catch(() => {
         if (active) setUserOrder([]);
       });
+
     return () => {
       active = false;
     };
-  }, [useUserFundamentals]);
+  }, [useUserFundamentals, selectedPipeId]);
 
   const viewRecords = useMemo(
     () => (useUserFundamentals ? applyUserFilters(records, userFilters) : records),
@@ -2148,6 +2195,27 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
               </div>
             </div>
             <div className="flex flex-wrap gap-3">
+              <label className="sr-only" htmlFor="pipe-filter">
+                Seleziona pipe
+              </label>
+              <select
+                id="pipe-filter"
+                value={selectedPipeId ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedPipeId(val ? Number(val) : null);
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-inner focus:border-slate-300 focus:outline-none"
+                disabled={!useUserFundamentals || pipes.length === 0}
+              >
+                <option value="">Seleziona pipe</option>
+                {pipes.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name || `Pipe ${p.id}`}
+                  </option>
+                ))}
+              </select>
+
               <label className="sr-only" htmlFor="asof-filter">
                 Seleziona giornata
               </label>
@@ -2237,11 +2305,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
                         <button
                           type="button"
                           className="rounded-full p-2 text-slate-600 hover:bg-slate-100"
-                          onClick={(e) => {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setOrderMenuAnchor({ x: rect.right, y: rect.bottom });
-                            setOrderMenuOpen((v) => !v);
-                          }}
+                          onClick={() => setOrderMenuOpen((v) => !v)}
                           aria-label="Visualizza ordinamento"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">

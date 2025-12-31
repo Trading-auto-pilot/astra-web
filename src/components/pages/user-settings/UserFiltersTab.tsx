@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { env } from "../../../config/env";
 
 type Comparator = "gt" | "lt";
@@ -127,6 +127,9 @@ export default function UserFiltersTab() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [pipes, setPipes] = useState<Array<{ id: number; name: string; enabled?: boolean }>>([]);
+  const [pipesLoading, setPipesLoading] = useState(false);
+  const [selectedPipeId, setSelectedPipeId] = useState<number | null>(null);
 
   const resetMessages = () => {
     setError(null);
@@ -285,33 +288,85 @@ export default function UserFiltersTab() {
     }
   };
 
-  const loadFilters = async () => {
-    if (!token) return;
-    setLoading(true);
-    resetMessages();
+  const loadPipes = useCallback(async () => {
     try {
-      const resp = await fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters`, {
-        headers: { Authorization: `Bearer ${token}` },
+      setPipesLoading(true);
+      const resp = await fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/users/pipes`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
-      rows.forEach((row) => applyFilterRow(row));
-      setSuccess("Filtri caricati");
-    } catch (err: any) {
-      setError(err?.message || "Errore nel caricamento filtri");
+      const data = await resp.json().catch(() => ({}));
+      const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+      const enabled = list
+        .map((p: any) => ({ ...p, enabled: p?.enabled === true || p?.enabled === 1 || p?.enabled === "1" }))
+        .filter((p: any) => p.enabled);
+      setPipes(enabled);
+      if (enabled.length && selectedPipeId === null) {
+        setSelectedPipeId(enabled[0].id);
+        return enabled[0].id;
+      }
+      return enabled.find((p: any) => p.id === selectedPipeId)?.id ?? null;
+    } catch {
+      setPipes([]);
+      return null;
     } finally {
-      setLoading(false);
+      setPipesLoading(false);
     }
-  };
+  }, [token, selectedPipeId]);
+
+  const loadFilters = useCallback(
+    async (pipeId: number | null) => {
+      if (!token || pipeId === null || pipeId === undefined) {
+        setError("Seleziona una pipe per caricare i filtri.");
+        return;
+      }
+      setLoading(true);
+      resetMessages();
+      try {
+        const resp = await fetch(
+          `${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters/${encodeURIComponent(pipeId)}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+        rows.forEach((row: any) => applyFilterRow(row));
+        setSuccess("Filtri caricati");
+      } catch (err: any) {
+        setError(err?.message || "Errore nel caricamento filtri");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token]
+  );
 
   useEffect(() => {
-    loadFilters();
+    const bootstrap = async () => {
+      if (!token) return;
+      const firstPipe = await loadPipes();
+      const effectivePipe = selectedPipeId ?? firstPipe;
+      if (effectivePipe !== null && effectivePipe !== undefined) {
+        loadFilters(effectivePipe);
+      }
+    };
+    bootstrap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  useEffect(() => {
+    if (selectedPipeId !== null && selectedPipeId !== undefined) {
+      loadFilters(selectedPipeId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPipeId]);
+
   const saveFilters = async () => {
-    if (!token) return;
+    if (!token || selectedPipeId === null || selectedPipeId === undefined) {
+      setError("Seleziona una pipe prima di salvare.");
+      return;
+    }
     setSaving(true);
     resetMessages();
     const headers = {
@@ -352,7 +407,9 @@ export default function UserFiltersTab() {
     try {
       for (const [name, val, compVal, en] of toSave) {
         const resp = await fetch(
-          `${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters/${encodeURIComponent(String(name))}`,
+          `${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters/${encodeURIComponent(
+            String(name)
+          )}/${encodeURIComponent(String(selectedPipeId))}`,
           {
             method: "PUT",
             headers,
@@ -360,6 +417,7 @@ export default function UserFiltersTab() {
               value: val,
               comparator: compVal === "lt" || compVal === "LT" ? "LT" : "GT",
               enabled: !!en,
+              pipe_id: selectedPipeId,
             }),
           }
         );
@@ -377,19 +435,59 @@ export default function UserFiltersTab() {
 
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end gap-2">
-        <button
-          className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm"
-          onClick={() => {
-            setError(null);
-            setSuccess(null);
-            loadFilters();
-          }}
-          disabled={loading}
-        >
-          Reload
-        </button>
+    <div className="grid gap-4 md:grid-cols-[220px,1fr]">
+      <div className="space-y-3">
+        <div className="bg-white rounded-lg shadow-sm p-4 space-y-2">
+          <div className="text-sm font-semibold text-slate-900">Pipe</div>
+          {pipesLoading && <div className="text-xs text-slate-500">Caricamento...</div>}
+          {!pipesLoading && (
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedPipeId(null)}
+                className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
+                  selectedPipeId === null
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                    : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Default
+              </button>
+              {pipes.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedPipeId(p.id)}
+                  className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
+                    selectedPipeId === p.id
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {p.name || `Pipe ${p.id}`}
+                </button>
+              ))}
+              {!pipesLoading && pipes.length === 0 && (
+                <div className="text-xs text-slate-500">Nessuna pipe abilitata.</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex justify-end gap-2">
+          <button
+            className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm"
+            onClick={() => {
+              setError(null);
+              setSuccess(null);
+              loadFilters(selectedPipeId);
+            }}
+            disabled={loading}
+          >
+            Reload
+          </button>
         <button
           className="px-3 py-2 rounded-md bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
           onClick={saveFilters}
@@ -399,14 +497,14 @@ export default function UserFiltersTab() {
         </button>
       </div>
 
-      {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {success && (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {success}
-        </div>
-      )}
+        {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        {success && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {success}
+          </div>
+        )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -2277,7 +2375,8 @@ export default function UserFiltersTab() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      </div>
     </div>
   );
 }

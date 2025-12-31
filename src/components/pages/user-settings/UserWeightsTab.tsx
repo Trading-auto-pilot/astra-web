@@ -181,37 +181,129 @@ export default function UserWeightsTab() {
   const [success, setSuccess] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
+  const [pipes, setPipes] = useState<Array<{ id: number; name: string; enabled?: boolean }>>([]);
+  const [pipesLoading, setPipesLoading] = useState(false);
+  const [selectedPipeId, setSelectedPipeId] = useState<number | null>(null);
 
   const token = useMemo(
     () => (typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null),
     []
   );
 
+  const loadPipes = useCallback(
+    async () => {
+      try {
+        setPipesLoading(true);
+        const res = await fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/users/pipes`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        const data = await res.json().catch(() => ({}));
+        const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+        const normalized = list.map((p: { id: number; enabled?: boolean | number | string; name?: string }) => ({
+          ...p,
+          enabled: p?.enabled === true || p?.enabled === 1 || p?.enabled === "1",
+        }));
+        const enabled = normalized.filter((p: { id: number; enabled?: boolean }) => !!p.enabled);
+        setPipes(enabled);
+        if (enabled.length && selectedPipeId === null) {
+          setSelectedPipeId(enabled[0].id);
+          return enabled[0].id;
+        }
+        return enabled.find((p: { id: number }) => p.id === selectedPipeId)?.id ?? null;
+      } catch (err) {
+        setPipes([]);
+        return null;
+      } finally {
+        setPipesLoading(false);
+      }
+    },
+    [token, selectedPipeId]
+  );
+
   const loadWeights = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${env.apiBaseUrl}/auth/admin/me`, {
+      const meRes = await fetch(`${env.apiBaseUrl}/auth/admin/me`, {
         headers: {
           Authorization: token ? `Bearer ${token}` : "",
         },
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const me = await res.json();
+      if (!meRes.ok) throw new Error(`HTTP ${meRes.status}`);
+      const me = await meRes.json();
       const uid = Number(me?.user?.id ?? me?.id ?? me?.tokenPayload?.sub);
       if (!uid) throw new Error("Utente non valido");
       setUserId(uid);
-      setWeights(normalizeIncoming(me?.scoreWeights));
+
+      const pipeFromList = await loadPipes();
+      const initialPipe = pipeFromList ?? selectedPipeId;
+      if (initialPipe === null || initialPipe === undefined) {
+        setError("Seleziona una pipe valida per caricare i pesi.");
+        return;
+      }
+      if (selectedPipeId === null && pipeFromList !== null) {
+        setSelectedPipeId(pipeFromList);
+      }
+      const pipePath = `/${encodeURIComponent(initialPipe)}`;
+      const wRes = await fetch(
+        `${env.apiBaseUrl}/tickerscanner/fundamentals/user/score-weights${pipePath}`,
+        {
+          headers: {
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        }
+      );
+      if (!wRes.ok) throw new Error(`HTTP ${wRes.status}`);
+      const weightsPayload = await wRes.json();
+      const normalized = normalizeIncoming(weightsPayload?.data || weightsPayload);
+      setWeights(normalized);
     } catch (err: any) {
       setError(err?.message || "Errore durante il caricamento");
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, loadPipes, selectedPipeId]);
+
+  const fetchWeightsForPipe = useCallback(
+    async (pipeId: number | null, uid?: number) => {
+      const effectiveUid = uid ?? userId;
+      if (!effectiveUid || pipeId === null || pipeId === undefined) return;
+      try {
+        setLoading(true);
+        setError(null);
+        const pipeQuery = `/${encodeURIComponent(pipeId)}`;
+        const wRes = await fetch(
+          `${env.apiBaseUrl}/tickerscanner/fundamentals/user/score-weights${pipeQuery}`,
+          {
+            headers: {
+              Authorization: token ? `Bearer ${token}` : "",
+            },
+          }
+        );
+        if (!wRes.ok) throw new Error(`HTTP ${wRes.status}`);
+        const weightsPayload = await wRes.json();
+        const normalized = normalizeIncoming(weightsPayload?.data || weightsPayload);
+        setWeights(normalized);
+      } catch (err: any) {
+        setError(err?.message || "Errore durante il caricamento");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token, userId]
+  );
 
   useEffect(() => {
     loadWeights();
   }, [loadWeights]);
+
+  useEffect(() => {
+    if (selectedPipeId !== null) {
+      fetchWeightsForPipe(selectedPipeId);
+    }
+  }, [selectedPipeId, fetchWeightsForPipe]);
 
   const handleSave = async () => {
     if (!userId) return;
@@ -219,14 +311,20 @@ export default function UserWeightsTab() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch(`${env.apiBaseUrl}/auth/admin/user/${userId}/score-weights`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-        body: JSON.stringify(weights),
-      });
+      const res = await fetch(
+        `${env.apiBaseUrl}/tickerscanner/fundamentals/user/score-weights/${encodeURIComponent(selectedPipeId ?? 0)}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+          body: JSON.stringify({
+            ...weights,
+            pipe_id: selectedPipeId,
+          }),
+        }
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setSuccess("Pesi salvati con successo");
     } catch (err: any) {
@@ -282,7 +380,6 @@ export default function UserWeightsTab() {
     const group = GROUPS.find((g) => g.id === groupId);
     if (!group) return null;
     const handles = weightsToHandles(group.keys, weights);
-    const total = group.keys.reduce((acc, k) => acc + (weights[k] ?? 0), 0);
 
     return (
       <div key={group.id} className="bg-white rounded-lg shadow-sm p-4 space-y-4">
@@ -346,49 +443,99 @@ export default function UserWeightsTab() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap justify-end gap-2">
-        <button
-          className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-          onClick={loadWeights}
-          disabled={loading}
-        >
-          Reload
-        </button>
-        <button
-          className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-          onClick={applyDefaults}
-        >
-          Set default
-        </button>
-        <button
-          className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-          onClick={handleRecalculate}
-          disabled={running}
-        >
-          {running ? "Running..." : "Run now"}
-        </button>
-        <button
-          className="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
-          onClick={handleSave}
-          disabled={saving || !userId}
-        >
-          {saving ? "Salvataggio..." : "Save"}
-        </button>
+    <div className="grid gap-4 md:grid-cols-[220px,1fr]">
+      <div className="space-y-3">
+        <div className="bg-white rounded-lg shadow-sm p-4 space-y-2">
+          <div className="text-sm font-semibold text-slate-900">Pipe</div>
+          {pipesLoading && <div className="text-xs text-slate-500">Caricamento...</div>}
+          {!pipesLoading && (
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedPipeId(null)}
+                className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
+                  selectedPipeId === null
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                    : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Default
+              </button>
+              {pipes.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedPipeId(p.id)}
+                  className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
+                    selectedPipeId === p.id
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {p.name || `Pipe ${p.id}`}
+                </button>
+              ))}
+              {!pipesLoading && pipes.length === 0 && (
+                <div className="text-xs text-slate-500">Nessuna pipe abilitata.</div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
+      <div className="space-y-4">
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+            onClick={loadWeights}
+            disabled={loading}
+          >
+            Reload
+          </button>
+          <button
+            className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+            onClick={applyDefaults}
+          >
+            Set default
+          </button>
+          <button
+            className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+            onClick={handleRecalculate}
+            disabled={running}
+          >
+            {running ? "Running..." : "Run now"}
+          </button>
+          <button
+            className="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+            onClick={handleSave}
+            disabled={saving || !userId}
+          >
+            {saving ? "Salvataggio..." : "Save"}
+          </button>
         </div>
-      )}
-      {success && (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {success}
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{GROUPS.map((g) => renderCard(g.id))}</div>
+        <div className="flex items-center justify-between text-sm text-slate-600">
+          <div>
+            Pipe selezionata:{" "}
+            <span className="font-semibold text-slate-800">
+              {selectedPipeId === null ? "Default" : pipes.find((p) => p.id === selectedPipeId)?.name || selectedPipeId}
+            </span>
+          </div>
+        </div>
+
+        {error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {success}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{GROUPS.map((g) => renderCard(g.id))}</div>
+      </div>
     </div>
   );
 }
