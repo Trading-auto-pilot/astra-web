@@ -82,3 +82,96 @@ export async function startTickerScanForce(): Promise<any> {
 export async function refreshTickerMomentum(): Promise<any> {
   return doRequest("/tickerscanner/momentum/refresh", { method: "POST" });
 }
+
+export async function updateMarketDaily(): Promise<any> {
+  return doRequest("/tickerscanner/fundamentals/update-market-daily", { method: "POST" });
+}
+
+export type MarketDailyJob = {
+  id: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  totalSymbols?: number;
+  processed?: number;
+  inserted?: number;
+  updated?: number;
+  errors?: any[];
+  error?: any;
+};
+
+export async function fetchMarketDailyJobs(): Promise<MarketDailyJob[]> {
+  const data = await doRequest("/tickerscanner/fundamentals/update-market-daily", { method: "GET" });
+  if (Array.isArray((data as any)?.jobs)) return (data as any).jobs as MarketDailyJob[];
+  if (Array.isArray(data)) return data as MarketDailyJob[];
+  return [];
+}
+
+export async function cancelMarketDailyJob(jobId: string): Promise<any> {
+  return doRequest(`/tickerscanner/fundamentals/update-market-daily/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function cancelTickerScanJob(jobId: string): Promise<any> {
+  return doRequest(`/tickerscanner/scan/jobs/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
+}
+
+export type UserDailyJob = {
+  id: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  processed?: number;
+  saved?: number;
+  total?: number;
+  date?: string;
+  pipeId?: number | null;
+  errors?: any[];
+  error?: any;
+};
+
+export async function startUserDailyJob(
+  date: string,
+  pipeId?: number | null,
+  version?: string,
+  name?: string
+): Promise<{ jobId: string }> {
+  const body: any = { date };
+  if (pipeId !== undefined && pipeId !== null) body.pipeId = pipeId;
+  if (version) body.version = version;
+  if (name) body.name = name;
+  return doRequest("/tickerscanner/fundamentals/user-daily-scores", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchUserDailyJobs(): Promise<UserDailyJob[]> {
+  const data = await doRequest("/tickerscanner/fundamentals/user-daily-scores", { method: "GET" });
+  if (Array.isArray((data as any)?.jobs)) return (data as any).jobs as UserDailyJob[];
+  if (Array.isArray(data)) return data as UserDailyJob[];
+  return [];
+}
+
+export async function cancelUserDailyJob(jobId: string): Promise<any> {
+  return doRequest(`/tickerscanner/fundamentals/user-daily-scores/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+}
+
+// Pipes (utili per selezione pipe nella UI)
+export type UserPipe = {
+  id: number;
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  pipe_id?: number;
+};
+
+export async function fetchUserPipes(): Promise<UserPipe[]> {
+  const data = await doRequest("/tickerscanner/fundamentals/users/pipes", { method: "GET" });
+  if (Array.isArray((data as any)?.data)) return (data as any).data as UserPipe[];
+  if (Array.isArray(data)) return data as UserPipe[];
+  return [];
+}

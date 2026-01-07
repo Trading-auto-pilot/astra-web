@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import SectionHeader from "../molecules/content/SectionHeader";
 import UserGeneralTab from "./user-settings/UserGeneralTab";
 import UserWeightsTab from "./user-settings/UserWeightsTab";
+import UserScoresTab from "./user-settings/UserScoresTab";
 import UserFiltersTab from "./user-settings/UserFiltersTab";
 import UserOrderByTab from "./user-settings/UserOrderByTab";
 
-type TabKey = "general" | "weights" | "filters" | "orderby";
+type TabKey = "general" | "scores" | "weights" | "filters" | "orderby";
 
 type TabDef = {
   key: TabKey;
@@ -14,6 +15,7 @@ type TabDef = {
 
 const TABS: TabDef[] = [
   { key: "general", label: "General" },
+  { key: "scores", label: "Scores" },
   { key: "weights", label: "Scores weighted" },
   { key: "filters", label: "Filters" },
   { key: "orderby", label: "Order By" },
@@ -26,7 +28,7 @@ const getTabFromHash = (): TabKey => {
   if (queryString) {
     const params = new URLSearchParams(queryString);
     const tabParam = params.get("tab");
-    if (tabParam && ["general", "weights", "filters"].includes(tabParam)) {
+    if (tabParam && ["general", "scores", "weights", "filters", "orderby"].includes(tabParam)) {
       return tabParam as TabKey;
     }
   }
@@ -46,6 +48,8 @@ export default function UserSettingsPage() {
     switch (activeTab) {
       case "general":
         return <UserGeneralTab />;
+      case "scores":
+        return <UserScoresTab />;
       case "weights":
         return <UserWeightsTab />;
       case "filters":
