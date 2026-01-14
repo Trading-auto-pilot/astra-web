@@ -20,6 +20,7 @@ import {
   fetchFundamentalsHistory,
   fetchUserFundamentalsView,
 } from "../../api/fundamentals";
+import { fetchMarketDailyCompare, fetchScoresDailyByUser } from "../../api/tickerScanner";
 import SectionHeader from "../molecules/content/SectionHeader";
 import ReactApexChart from "react-apexcharts";
 import ReactCountryFlag from "react-country-flag";
@@ -64,6 +65,11 @@ const formatNumber = (value: number | null) => {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
 };
 
+const toNumberOrNull = (value: unknown): number | null => {
+  const num = typeof value === "string" ? Number(value) : (value as number);
+  return Number.isFinite(num) ? num : null;
+};
+
 const getUpdateDeltaHours = (value: unknown) => {
   if (!value) return "-";
   const date = new Date(value as any);
@@ -104,6 +110,18 @@ const formatCurrency = (value: number | null, currency?: string) => {
     }
   }
   return `${formatNumber(value)} ${currency ?? ""}`.trim();
+};
+
+const formatPercent = (value: number | null) => {
+  if (value === null || Number.isNaN(value)) return "-";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}%`;
+};
+
+const formatSignedNumber = (value: number | null) => {
+  if (value === null || Number.isNaN(value)) return "-";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value)}`;
 };
 
 const formatDetailValue = (value: unknown) => {
@@ -158,8 +176,17 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
     "growthProbability",
     "user_growth_probability",
   ],
+  growth_probability: [
+    "user_grow_score",
+    "grow_score",
+    "growth_probability",
+    "growthProbability",
+    "user_growth_probability",
+  ],
   growthMomentum: ["user_momentum_score", "momentum_score", "momentumScore", "user_momentum"],
+  growth_momentum: ["user_momentum_score", "momentum_score", "momentumScore", "user_momentum"],
   growthRisk: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
+  growth_risk: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
   growthMarket: [
     "user_market_score",
     "market_score",
@@ -167,7 +194,23 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
     "momentum_json.components.marketRisk.score",
     "momentum.components.marketRisk.score",
   ],
+  growth_market: [
+    "user_market_score",
+    "market_score",
+    "marketScore",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
   mom1m: [
+    "user_mom1m_score",
+    "mom_1m",
+    "mom1m",
+    "momentum_1m",
+    "mom1mScore",
+    "momentum.components.mom1mScore",
+    "momentum_json.components.mom1mScore",
+  ],
+  mom_1m: [
     "user_mom1m_score",
     "mom_1m",
     "mom1m",
@@ -185,7 +228,25 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
     "momentum.components.mom3mScore",
     "momentum_json.components.mom3mScore",
   ],
+  mom_3m: [
+    "user_mom3m_score",
+    "mom_3m",
+    "mom3m",
+    "momentum_3m",
+    "mom3mScore",
+    "momentum.components.mom3mScore",
+    "momentum_json.components.mom3mScore",
+  ],
   mom6m: [
+    "user_mom6m_score",
+    "mom_6m",
+    "mom6m",
+    "momentum_6m",
+    "mom6mScore",
+    "momentum.components.mom6mScore",
+    "momentum_json.components.mom6mScore",
+  ],
+  mom_6m: [
     "user_mom6m_score",
     "mom_6m",
     "mom6m",
@@ -203,7 +264,23 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
     "momentum.components.mom12mScore",
     "momentum_json.components.mom12mScore",
   ],
+  mom_12m: [
+    "user_mom12m_score",
+    "mom_12m",
+    "mom12m",
+    "momentum_12m",
+    "mom12mScore",
+    "momentum.components.mom12mScore",
+    "momentum_json.components.mom12mScore",
+  ],
   doubletopScore: [
+    "user_double_top_score",
+    "double_top_score",
+    "doubletopScore",
+    "momentum.components.doubleTop.score",
+    "momentum_json.components.doubleTop.score",
+  ],
+  double_top_score: [
     "user_double_top_score",
     "double_top_score",
     "doubletopScore",
@@ -214,8 +291,13 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
 
 const ORDER_FIELD_MAP: Record<string, string[]> = {
   growth_probability: ["user_grow_score", "grow_score", "growth_probability"],
+  growthProbability: ["user_grow_score", "grow_score", "growth_probability"],
   momentum_score: ["user_momentum_score", "momentum_score"],
+  momentum_score_short: ["momentum_score_short", "momentum_short_score", "momentum_score_short"],
+  momentumScoreShort: ["momentum_score_short", "momentum_short_score", "momentum_score_short"],
   risk_score: ["user_risk_score", "risk_score"],
+  quality_score: ["user_quality_score", "quality_score"],
+  total_score: ["total_score", "score", "totalScore"],
   market_score: [
     "user_market_score",
     "market_score",
@@ -316,6 +398,9 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const [historyCache, setHistoryCache] = useState<Record<string, FundamentalRecord[]>>({});
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("today");
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const [scoresMissingMessage, setScoresMissingMessage] = useState<string | null>(null);
+  const [marketDailyCompare, setMarketDailyCompare] = useState<Record<string, any>>({});
   const [pipes, setPipes] = useState<Array<{ id: number; name?: string; enabled?: boolean }>>([]);
   const [selectedPipeId, setSelectedPipeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -368,6 +453,13 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const [showMomentum, setShowMomentum] = useState(true);
   const [showRisk, setShowRisk] = useState(true);
   const [showMarket, setShowMarket] = useState(true);
+  const [showTotal, setShowTotal] = useState(true);
+  const [showValuation, setShowValuation] = useState(true);
+  const [showQuality, setShowQuality] = useState(true);
+  const [showVolume, setShowVolume] = useState(true);
+  const [showMarketRisk, setShowMarketRisk] = useState(true);
+  const [showShortRisk, setShowShortRisk] = useState(true);
+  const [showMomentumShort, setShowMomentumShort] = useState(true);
   const [showMom1, setShowMom1] = useState(true);
   const [showMom3, setShowMom3] = useState(true);
   const [showMom6, setShowMom6] = useState(true);
@@ -383,6 +475,13 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     momentum: showMomentum,
     risk: showRisk,
     market: showMarket,
+    total: showTotal,
+    valuation: showValuation,
+    quality: showQuality,
+    volume: showVolume,
+    marketRisk: showMarketRisk,
+    shortRisk: showShortRisk,
+    momentumShort: showMomentumShort,
     mom1: showMom1,
     mom3: showMom3,
     mom6: showMom6,
@@ -436,6 +535,13 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
           momentum: boolean;
           risk: boolean;
           market: boolean;
+          total: boolean;
+          valuation: boolean;
+          quality: boolean;
+          volume: boolean;
+          marketRisk: boolean;
+          shortRisk: boolean;
+          momentumShort: boolean;
           mom1: boolean;
           mom3: boolean;
           mom6: boolean;
@@ -447,6 +553,13 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
         if (typeof parsed.momentum === "boolean") setShowMomentum(parsed.momentum);
         if (typeof parsed.risk === "boolean") setShowRisk(parsed.risk);
         if (typeof parsed.market === "boolean") setShowMarket(parsed.market);
+        if (typeof parsed.total === "boolean") setShowTotal(parsed.total);
+        if (typeof parsed.valuation === "boolean") setShowValuation(parsed.valuation);
+        if (typeof parsed.quality === "boolean") setShowQuality(parsed.quality);
+        if (typeof parsed.volume === "boolean") setShowVolume(parsed.volume);
+        if (typeof parsed.marketRisk === "boolean") setShowMarketRisk(parsed.marketRisk);
+        if (typeof parsed.shortRisk === "boolean") setShowShortRisk(parsed.shortRisk);
+        if (typeof parsed.momentumShort === "boolean") setShowMomentumShort(parsed.momentumShort);
         if (typeof parsed.mom1 === "boolean") setShowMom1(parsed.mom1);
         if (typeof parsed.mom3 === "boolean") setShowMom3(parsed.mom3);
         if (typeof parsed.mom6 === "boolean") setShowMom6(parsed.mom6);
@@ -471,6 +584,13 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     showMomentum,
     showRisk,
     showMarket,
+    showTotal,
+    showValuation,
+    showQuality,
+    showVolume,
+    showMarketRisk,
+    showShortRisk,
+    showMomentumShort,
     showMom1,
     showMom3,
     showMom6,
@@ -522,7 +642,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
 
   useEffect(() => {
     if (useUserFundamentals) {
-      setAvailableDates(["today"]);
+      setAvailableDates((prev) => (prev.includes("today") ? prev : ["today", ...prev]));
       return;
     }
     let active = true;
@@ -551,6 +671,78 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   }, [useUserFundamentals]);
 
   useEffect(() => {
+    if (!useUserFundamentals || !selectedPipeId) {
+      return;
+    }
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    let active = true;
+    const loadCounts = async () => {
+      try {
+        const res = await fetch(
+          `${env.apiBaseUrl}/tickerscanner/fundamentals/scores-daily/counts/${encodeURIComponent(selectedPipeId)}`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          }
+        );
+        const data = await res.json().catch(() => ({} as any));
+        if (!res.ok) return;
+        const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+        const dates = new Set<string>();
+        rows.forEach((r: any) => {
+          const date = (r?.score_date || r?.scoreDate || "").toString().slice(0, 10);
+          if (!date) return;
+          dates.add(date);
+        });
+        if (!active) return;
+        setAvailableDates((prev) => {
+          const base = prev.includes("today") ? ["today", ...prev.filter((d) => d !== "today")] : ["today", ...prev];
+          const merged = new Set(base);
+          dates.forEach((d) => merged.add(d));
+          return Array.from(merged);
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+    loadCounts();
+    return () => {
+      active = false;
+    };
+  }, [useUserFundamentals, selectedPipeId]);
+
+  useEffect(() => {
+    if (!useUserFundamentals) {
+      setMarketDailyCompare({});
+      return;
+    }
+    const compareDate = selectedDate === "today" ? todayIso : selectedDate;
+    if (!compareDate) {
+      setMarketDailyCompare({});
+      return;
+    }
+    let active = true;
+    fetchMarketDailyCompare(compareDate)
+      .then((rows) => {
+        if (!active) return;
+        const map: Record<string, any> = {};
+        (Array.isArray(rows) ? rows : []).forEach((r: any) => {
+          if (!r?.symbol) return;
+          map[String(r.symbol).toUpperCase()] = r;
+        });
+        setMarketDailyCompare(map);
+      })
+      .catch(() => {
+        if (active) setMarketDailyCompare({});
+      });
+    return () => {
+      active = false;
+    };
+  }, [useUserFundamentals, selectedDate, todayIso]);
+
+  useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
@@ -558,9 +750,28 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     const load = async () => {
       try {
         if (useUserFundamentals) {
+          if (selectedDate !== "today") {
+            if (!selectedPipeId) {
+              if (!active) return;
+              setRecords([]);
+              setScoresMissingMessage("Seleziona una pipe per caricare gli score della data.");
+              return;
+            }
+            const data = await fetchScoresDailyByUser(selectedPipeId, selectedDate);
+            if (!active) return;
+            setRecords(Array.isArray(data) ? data : []);
+            setScoresMissingMessage(
+              Array.isArray(data) && data.length === 0
+                ? "Non ci sono score per questa data. Avvia il calcolo per generare gli score."
+                : null
+            );
+            return;
+          }
+
           const data = await fetchUserFundamentalsView();
           if (!active) return;
           setRecords(Array.isArray(data) ? data : []);
+          setScoresMissingMessage(null);
           return;
         }
 
@@ -608,7 +819,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     return () => {
       active = false;
     };
-  }, [selectedDate, useUserFundamentals, historyCache]);
+  }, [selectedDate, useUserFundamentals, historyCache, selectedPipeId]);
 
   useEffect(() => {
     const syncSymbol = () => {
@@ -2219,19 +2430,28 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
               <label className="sr-only" htmlFor="asof-filter">
                 Seleziona giornata
               </label>
-              <select
+              <input
                 id="asof-filter"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                type="date"
+                value={selectedDate === "today" ? todayIso : selectedDate}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!val || val === todayIso) {
+                    setSelectedDate("today");
+                  } else {
+                    setSelectedDate(val);
+                  }
+                }}
+                list="asof-date-options"
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-inner focus:border-slate-300 focus:outline-none"
-              >
-                <option value="today">Today (live)</option>
-                {availableDates.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
+              />
+              <datalist id="asof-date-options">
+                {availableDates
+                  .filter((d) => d !== "today")
+                  .map((d) => (
+                    <option key={d} value={d} />
+                  ))}
+              </datalist>
               <label className="sr-only" htmlFor="industry-filter">
                 Filtra per industria
               </label>
@@ -2281,6 +2501,16 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
             .
           </div>
         )}
+        {viewRecords.length > 50 && (
+          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700">
+            Nota: la lista mostra solo i primi 50 tickers (filtri e ordinamento applicati).
+          </div>
+        )}
+        {scoresMissingMessage && (
+          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-800">
+            {scoresMissingMessage}
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center px-6 py-10 text-sm text-slate-500">
             Caricamento in corso...
@@ -2296,6 +2526,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
               <th className="px-4 py-3 font-semibold">Settore</th>
               <th className="px-4 py-3 font-semibold">Industria</th>
               <th className="px-4 py-3 font-semibold">Paese</th>
+              <th className="px-4 py-3 font-semibold">Variazione</th>
               <th className="px-4 py-3 font-semibold">
                 <div className="flex items-center justify-between gap-2">
                   <span>Scores</span>
@@ -2416,6 +2647,90 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
                             <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
                               <input
                                 type="checkbox"
+                                checked={showTotal}
+                                onChange={(e) => {
+                                  setShowTotal(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), total: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Total Score</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showValuation}
+                                onChange={(e) => {
+                                  setShowValuation(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), valuation: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Valuation</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showQuality}
+                                onChange={(e) => {
+                                  setShowQuality(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), quality: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Quality</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showVolume}
+                                onChange={(e) => {
+                                  setShowVolume(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), volume: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Volume Score</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMarketRisk}
+                                onChange={(e) => {
+                                  setShowMarketRisk(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), marketRisk: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Market Risk</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showShortRisk}
+                                onChange={(e) => {
+                                  setShowShortRisk(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), shortRisk: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Short Risk</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={showMomentumShort}
+                                onChange={(e) => {
+                                  setShowMomentumShort(e.target.checked);
+                                  persistScoreVisibility({ ...buildScoreVisibility(), momentumShort: e.target.checked });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>Momentum Short</span>
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-slate-50">
+                              <input
+                                type="checkbox"
                                 checked={showMom1}
                                 onChange={(e) => {
                                   setShowMom1(e.target.checked);
@@ -2485,6 +2800,8 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
               <tbody className="divide-y divide-slate-100 text-slate-800">
                 {topRows.map((item, idx) => {
                   const symbol = item.ticker || item.symbol || "-";
+                  const symbolKey = symbol && symbol !== "-" ? String(symbol).toUpperCase() : "";
+                  const compareRow = symbolKey ? marketDailyCompare[symbolKey] : null;
 
                   const getScore = (...keys: string[]) => {
                     for (const key of keys) {
@@ -2543,6 +2860,30 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
                       <td className="px-4 py-3">{item.sector || "-"}</td>
                       <td className="px-4 py-3">{item.industry || "-"}</td>
                       <td className="px-4 py-3">{(item as any).country || "-"}</td>
+                      <td className="px-4 py-3">
+                        {compareRow ? (
+                          <div className="flex flex-col gap-1">
+                            <div
+                              className={`flex items-center gap-1 font-semibold ${
+                                Number(compareRow?.delta?.close_pct) >= 0 ? "text-emerald-600" : "text-rose-600"
+                              }`}
+                            >
+                              <span>{Number(compareRow?.delta?.close_pct) >= 0 ? "▲" : "▼"}</span>
+                              <span>{formatPercent(toNumberOrNull(compareRow?.delta?.close_pct))}</span>
+                              <span className="text-[11px] font-normal text-slate-500">
+                                {formatSignedNumber(toNumberOrNull(compareRow?.delta?.close_abs))}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              O {formatNumber(toNumberOrNull(compareRow?.target?.open))} · C{" "}
+                              {formatNumber(toNumberOrNull(compareRow?.target?.close))} · H{" "}
+                              {formatNumber(toNumberOrNull(compareRow?.target?.high))}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-4">
                           {showRadar && rowRadar ? (
@@ -2644,6 +2985,87 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
                               )}
                             </div>
                           )}
+                          {showTotal && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Total</span>
+                              {renderScoreBar(parseScore((item as any).total_score ?? (item as any).totalScore ?? (item as any).score))}
+                            </div>
+                          )}
+                          {showValuation && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Valuation</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_valuation_score ??
+                                    (item as any).valuation_score ??
+                                    (item as any).valuation_scores ??
+                                    (item as any).valuationScore
+                                )
+                              )}
+                            </div>
+                          )}
+                          {showQuality && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Quality</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).user_quality_score ??
+                                    (item as any).quality_score ??
+                                    (item as any).qualityScore
+                                )
+                              )}
+                            </div>
+                          )}
+                          {showVolume && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Volume</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).volume_score ??
+                                    (item as any).momentum_volume_score ??
+                                    (item as any)?.momentum_json?.components?.volume?.score ??
+                                    (item as any)?.momentum?.components?.volume?.score
+                                )
+                              )}
+                            </div>
+                          )}
+                          {showMarketRisk && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Market Risk</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).market_risk_score ??
+                                    (item as any).marketRiskScore ??
+                                    (item as any)?.momentum_json?.components?.marketRisk?.score ??
+                                    (item as any)?.momentum?.components?.marketRisk?.score
+                                )
+                              )}
+                            </div>
+                          )}
+                          {showShortRisk && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Short Risk</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).short_risk_score ??
+                                    (item as any).shortRiskScore ??
+                                    (item as any).risk_short_score
+                                )
+                              )}
+                            </div>
+                          )}
+                          {showMomentumShort && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-700">Momentum Short</span>
+                              {renderScoreBar(
+                                parseScore(
+                                  (item as any).momentum_score_short ??
+                                    (item as any).momentum_short_score ??
+                                    (item as any).momentumShortScore
+                                )
+                              )}
+                            </div>
+                          )}
                           {showMom1 && (
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-slate-700">Mom 1M</span>
@@ -2718,6 +3140,13 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
                             !showMomentum &&
                             !showRisk &&
                             !showMarket &&
+                            !showTotal &&
+                            !showValuation &&
+                            !showQuality &&
+                            !showVolume &&
+                            !showMarketRisk &&
+                            !showShortRisk &&
+                            !showMomentumShort &&
                             !showMom1 &&
                             !showMom3 &&
                             !showMom6 &&
@@ -2731,7 +3160,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
                 })}
                 {!topRows.length && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500">
+                    <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-500">
                       Nessun dato disponibile.
                     </td>
                   </tr>
