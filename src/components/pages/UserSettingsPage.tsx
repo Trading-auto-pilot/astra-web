@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
 import SectionHeader from "../molecules/content/SectionHeader";
 import UserGeneralTab from "./user-settings/UserGeneralTab";
-import UserWeightsTab from "./user-settings/UserWeightsTab";
 import UserScoresTab from "./user-settings/UserScoresTab";
-import UserFiltersTab from "./user-settings/UserFiltersTab";
-import UserOrderByTab from "./user-settings/UserOrderByTab";
 
-type TabKey = "general" | "scores" | "weights" | "filters" | "orderby";
+type TabKey = "general" | "scores";
 
 type TabDef = {
   key: TabKey;
@@ -16,33 +13,56 @@ type TabDef = {
 const TABS: TabDef[] = [
   { key: "general", label: "General" },
   { key: "scores", label: "Scores" },
-  { key: "weights", label: "Scores weighted" },
-  { key: "filters", label: "Filters" },
-  { key: "orderby", label: "Order By" },
 ];
 
-const getTabFromHash = (): TabKey => {
-  if (typeof window === "undefined") return "weights";
+const STORAGE_KEY = "astraai:user-settings:tab";
+
+const getStoredTab = (): TabKey | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    return stored === "general" || stored === "scores" ? (stored as TabKey) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getTabFromHash = (): TabKey | null => {
+  if (typeof window === "undefined") return null;
   const hash = window.location.hash || "";
   const [, queryString] = hash.split("?");
   if (queryString) {
     const params = new URLSearchParams(queryString);
     const tabParam = params.get("tab");
-    if (tabParam && ["general", "scores", "weights", "filters", "orderby"].includes(tabParam)) {
+    if (tabParam && ["general", "scores"].includes(tabParam)) {
       return tabParam as TabKey;
     }
   }
-  return "weights";
+  return null;
 };
 
 export default function UserSettingsPage() {
-  const [activeTab, setActiveTab] = useState<TabKey>(() => getTabFromHash());
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    return getTabFromHash() || getStoredTab() || "general";
+  });
 
   useEffect(() => {
-    const syncTab = () => setActiveTab(getTabFromHash());
+    const syncTab = () => {
+      const next = getTabFromHash();
+      if (next) setActiveTab(next);
+    };
     window.addEventListener("hashchange", syncTab);
     return () => window.removeEventListener("hashchange", syncTab);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, activeTab);
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [activeTab]);
 
   const renderTab = () => {
     switch (activeTab) {
@@ -50,12 +70,6 @@ export default function UserSettingsPage() {
         return <UserGeneralTab />;
       case "scores":
         return <UserScoresTab />;
-      case "weights":
-        return <UserWeightsTab />;
-      case "filters":
-        return <UserFiltersTab />;
-      case "orderby":
-        return <UserOrderByTab />;
       default:
         return null;
     }

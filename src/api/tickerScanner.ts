@@ -107,6 +107,39 @@ export async function fetchMarketDailyJobs(): Promise<MarketDailyJob[]> {
   return [];
 }
 
+export type MarketDailyJobHistory = {
+  id?: number;
+  job_id?: string;
+  status?: string;
+  total_symbols?: number;
+  processed?: number;
+  inserted?: number;
+  updated?: number;
+  error_count?: number;
+  errors_json?: any;
+  params_json?: any;
+  started_at?: string;
+  finished_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export async function fetchMarketDailyJobHistory(limit = 20): Promise<MarketDailyJobHistory[]> {
+  const data = await doRequest(
+    `/tickerscanner/fundamentals/market-daily-jobs?limit=${encodeURIComponent(String(limit))}`,
+    { method: "GET" }
+  );
+  if (Array.isArray((data as any)?.data)) return (data as any).data as MarketDailyJobHistory[];
+  if (Array.isArray(data)) return data as MarketDailyJobHistory[];
+  return [];
+}
+
+export async function deleteMarketDailyJobHistory(id: number): Promise<any> {
+  return doRequest(`/tickerscanner/fundamentals/market-daily-jobs/${encodeURIComponent(String(id))}`, {
+    method: "DELETE",
+  });
+}
+
 export async function cancelMarketDailyJob(jobId: string): Promise<any> {
   return doRequest(`/tickerscanner/fundamentals/update-market-daily/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
@@ -131,6 +164,26 @@ export type UserDailyJob = {
   pipeId?: number | null;
   errors?: any[];
   error?: any;
+};
+
+export type UserDailyScoreJob = {
+  id?: number;
+  job_id?: string;
+  user_id?: number;
+  pipe_id?: number | null;
+  status?: string;
+  target_date?: string;
+  model_name?: string;
+  model_version?: string;
+  total_items?: number;
+  saved_items?: number;
+  error_count?: number;
+  errors_json?: any;
+  params_json?: any;
+  started_at?: string;
+  finished_at?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export async function startUserDailyJob(
@@ -158,6 +211,44 @@ export async function fetchUserDailyJobs(): Promise<UserDailyJob[]> {
 
 export async function cancelUserDailyJob(jobId: string): Promise<any> {
   return doRequest(`/tickerscanner/fundamentals/user-daily-scores/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+}
+
+export async function fetchUserDailyScoreJobs(limit = 20): Promise<UserDailyScoreJob[]> {
+  const data = await doRequest(
+    `/tickerscanner/fundamentals/user-daily-score-jobs?limit=${encodeURIComponent(String(limit))}`,
+    { method: "GET" }
+  );
+  if (Array.isArray((data as any)?.data)) return (data as any).data as UserDailyScoreJob[];
+  if (Array.isArray(data)) return data as UserDailyScoreJob[];
+  return [];
+}
+
+export async function deleteUserDailyScoreJob(id: number): Promise<any> {
+  return doRequest(`/tickerscanner/fundamentals/user-daily-score-jobs/${encodeURIComponent(String(id))}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchScoresDailyByUser(pipeId: number, scoreDate: string): Promise<any[]> {
+  const data = await doRequest(
+    `/tickerscanner/fundamentals/scores-daily/by-user/${encodeURIComponent(String(pipeId))}/${encodeURIComponent(
+      scoreDate
+    )}`,
+    { method: "GET" }
+  );
+  if (Array.isArray((data as any)?.data)) return (data as any).data as any[];
+  if (Array.isArray(data)) return data as any[];
+  return [];
+}
+
+export async function fetchMarketDailyCompare(tradeDate: string): Promise<any[]> {
+  const data = await doRequest(
+    `/tickerscanner/fundamentals/market-daily/compare?trade_date=${encodeURIComponent(tradeDate)}`,
+    { method: "GET" }
+  );
+  if (Array.isArray((data as any)?.data)) return (data as any).data as any[];
+  if (Array.isArray(data)) return data as any[];
+  return [];
 }
 
 // Pipes (utili per selezione pipe nella UI)
