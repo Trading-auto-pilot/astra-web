@@ -12,6 +12,23 @@ export type TickerScanJob = {
   updatedAt?: string;
 };
 
+export type TickerScanJobHistory = {
+  id?: number;
+  job_id?: string;
+  status?: string;
+  total_raw_tickers?: number;
+  total_processed?: number;
+  db_hits?: number;
+  new_calculated?: number;
+  error?: string | null;
+  errors_json?: any;
+  params_json?: any;
+  started_at?: string;
+  finished_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 const buildUrl = (path: string) => `${env.apiBaseUrl}${path}`;
 
 const getToken = () => {
@@ -49,6 +66,22 @@ export async function fetchTickerScanJobs(signal?: AbortSignal): Promise<TickerS
   if (Array.isArray((data as any)?.jobs)) return (data as any).jobs as TickerScanJob[];
   if (Array.isArray(data)) return data as TickerScanJob[];
   return [];
+}
+
+export async function fetchTickerScanJobHistory(limit = 20): Promise<TickerScanJobHistory[]> {
+  const data = await doRequest(
+    `/tickerscanner/fundamentals/ticker-scan-jobs?limit=${encodeURIComponent(String(limit))}`,
+    { method: "GET" }
+  );
+  if (Array.isArray((data as any)?.data)) return (data as any).data as TickerScanJobHistory[];
+  if (Array.isArray(data)) return data as TickerScanJobHistory[];
+  return [];
+}
+
+export async function deleteTickerScanJobHistory(id: number): Promise<any> {
+  return doRequest(`/tickerscanner/fundamentals/ticker-scan-jobs/${encodeURIComponent(String(id))}`, {
+    method: "DELETE",
+  });
 }
 
 const doRequest = async (path: string, options: RequestInit = {}) => {
@@ -91,6 +124,8 @@ export type MarketDailyJob = {
   id: string;
   status?: string;
   createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
   updatedAt?: string;
   totalSymbols?: number;
   processed?: number;
@@ -156,6 +191,8 @@ export type UserDailyJob = {
   id: string;
   status?: string;
   createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
   updatedAt?: string;
   processed?: number;
   saved?: number;

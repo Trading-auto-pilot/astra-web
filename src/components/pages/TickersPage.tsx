@@ -287,6 +287,27 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
     "momentum.components.doubleTop.score",
     "momentum_json.components.doubleTop.score",
   ],
+  momentum_score: ["user_momentum_score", "momentum_score", "momentumScore"],
+  momentum_score_short: ["momentum_score_short", "momentum_short_score", "momentumShortScore"],
+  quality_score: ["user_quality_score", "quality_score", "qualityScore"],
+  valuation_score: ["user_valuation_score", "valuation_score", "valuation_scores", "valuationScore"],
+  risk_score: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
+  total_score: ["total_score", "score", "totalScore"],
+  market_risk_score: [
+    "market_risk_score",
+    "marketRiskScore",
+    "user_market_score",
+    "market_score",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
+  market_score: [
+    "market_score",
+    "marketScore",
+    "user_market_score",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
 };
 
 const ORDER_FIELD_MAP: Record<string, string[]> = {
@@ -901,14 +922,31 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
         const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
         const allowed = new Set([
           "growthProbability",
+          "growth_probability",
           "growthMomentum",
+          "growth_momentum",
           "growthRisk",
+          "growth_risk",
           "growthMarket",
+          "growth_market",
           "mom1m",
+          "mom_1m",
           "mom3m",
+          "mom_3m",
           "mom6m",
+          "mom_6m",
           "mom12m",
+          "mom_12m",
           "doubletopScore",
+          "double_top_score",
+          "momentum_score",
+          "momentum_score_short",
+          "risk_score",
+          "quality_score",
+          "valuation_score",
+          "total_score",
+          "market_risk_score",
+          "market_score",
         ]);
         const filtered = rows.filter((r: any) => allowed.has(r.filter_name || r.name));
         setUserFilters(
