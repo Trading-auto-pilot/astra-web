@@ -39,7 +39,7 @@ const parseJsonSafely = async (response: Response) => {
 
 export async function fetchSchedulerJobs(signal?: AbortSignal): Promise<SchedulerJob[]> {
   const token = getToken();
-  const response = await fetch(buildUrl("/scheduler/jobs"), {
+  const response = await fetch(buildUrl("/scheduler/jobs?include_disabled=1"), {
     method: "GET",
     credentials: "include",
     headers: {

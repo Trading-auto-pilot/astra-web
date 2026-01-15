@@ -274,7 +274,7 @@ export function SchedulerPage() {
         ruleType: "daily",
         daysOfWeekText: "",
         daysOfMonthText: "",
-        time: "",
+        time: "00:00",
       },
     ]);
   };
@@ -329,7 +329,7 @@ export function SchedulerPage() {
         ruleType: rule.ruleType || "daily",
         daysOfWeek: parseList(rule.daysOfWeekText),
         daysOfMonth: parseNumberList(rule.daysOfMonthText),
-        time: rule.time || null,
+        time: rule.time || "00:00",
       }));
 
     const payload = {
@@ -478,7 +478,7 @@ export function SchedulerPage() {
         ruleType: rule.ruleType || "daily",
         daysOfWeek: parseList(rule.daysOfWeekText),
         daysOfMonth: parseNumberList(rule.daysOfMonthText),
-        time: rule.time || null,
+        time: rule.time || "00:00",
       }));
 
     const payload = {

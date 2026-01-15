@@ -15,12 +15,15 @@ import {
   startTickerScanForce,
   updateMarketDaily,
   type TickerScanJob,
+  type TickerScanJobHistory,
   type MarketDailyJob,
   type MarketDailyJobHistory,
   type UserDailyJob,
   type UserDailyScoreJob,
   type UserPipe,
   fetchUserPipes,
+  fetchTickerScanJobHistory,
+  deleteTickerScanJobHistory,
 } from "../../api/tickerScanner";
 import SectionHeader from "../molecules/content/SectionHeader";
 import BaseButton from "../atoms/base/buttons/BaseButton";
@@ -39,6 +42,17 @@ const formatDateTime = (value?: string | null) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const formatDuration = (ms?: number | null) => {
+  if (!ms || ms <= 0 || !Number.isFinite(ms)) return "-";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -63,6 +77,11 @@ export default function TickerScannerAdminPage() {
   const [jobs, setJobs] = useState<TickerScanJob[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [scanTab, setScanTab] = useState<"current" | "ended">("current");
+  const [endedScanJobs, setEndedScanJobs] = useState<TickerScanJobHistory[]>([]);
+  const [endedScanStatus, setEndedScanStatus] = useState<Status>("idle");
+  const [scanDetailJob, setScanDetailJob] = useState<TickerScanJobHistory | null>(null);
+  const [scanDeleteJob, setScanDeleteJob] = useState<TickerScanJobHistory | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [marketJobs, setMarketJobs] = useState<MarketDailyJob[]>([]);
@@ -99,11 +118,28 @@ export default function TickerScannerAdminPage() {
     }
   }, []);
 
+  const loadEndedScanJobs = useCallback(async () => {
+    setEndedScanStatus("loading");
+    try {
+      const items = await fetchTickerScanJobHistory(20);
+      setEndedScanJobs(items);
+      setEndedScanStatus("idle");
+    } catch {
+      setEndedScanStatus("error");
+    }
+  }, []);
+
   useEffect(() => {
     loadJobs();
     const interval = setInterval(loadJobs, 15000);
     return () => clearInterval(interval);
   }, [loadJobs]);
+
+  useEffect(() => {
+    loadEndedScanJobs();
+    const interval = setInterval(loadEndedScanJobs, 15000);
+    return () => clearInterval(interval);
+  }, [loadEndedScanJobs, scanTab]);
 
   const loadMarketJobs = useCallback(async () => {
     setMarketStatus("loading");
@@ -271,79 +307,231 @@ export default function TickerScannerAdminPage() {
         </div>
       )}
 
-      {status === "loading" && rows.length === 0 && (
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
-          Caricamento...
-        </div>
+      <div className="flex items-center gap-2 border-b border-slate-200">
+        {[
+          { key: "current" as const, label: "In esecuzione" },
+          { key: "ended" as const, label: "Storico" },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            className={`px-3 py-2 text-[11px] font-semibold ${
+              scanTab === tab.key ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+            }`}
+            onClick={() => setScanTab(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {scanTab === "current" && (
+        <>
+          {status === "loading" && rows.length === 0 && (
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
+              Caricamento...
+            </div>
+          )}
+
+          {status === "error" && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </div>
+          )}
+
+          {rows.length === 0 && status !== "loading" && (
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
+              Nessun job attivo al momento.
+            </div>
+          )}
+
+          {rows.length > 0 && (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <table className="min-w-full divide-y divide-slate-200 text-xs">
+                <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Job ID</th>
+                    <th className="px-3 py-2 font-semibold">Status</th>
+                    <th className="px-3 py-2 font-semibold">Created</th>
+                    <th className="px-3 py-2 font-semibold">Updated</th>
+                    <th className="px-3 py-2 font-semibold text-right">Total</th>
+                    <th className="px-3 py-2 font-semibold text-right">Processed</th>
+                    <th className="px-3 py-2 font-semibold text-right">DB hits</th>
+                    <th className="px-3 py-2 font-semibold text-right">New calc</th>
+                    <th className="px-3 py-2 font-semibold">Error</th>
+                    <th className="px-3 py-2 font-semibold">Progress</th>
+                    <th className="px-3 py-2 font-semibold text-right">Azione</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((job) => {
+                    const total = Number(job.totalRawTickers || 0);
+                    const processed = Number(job.totalProcessed || 0);
+                    const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+                    const startedAt = job.createdAt;
+                    const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : null;
+                    const etaMs =
+                      elapsedMs && processed > 0 && total > processed
+                        ? (elapsedMs / processed) * (total - processed)
+                        : null;
+
+                    return (
+                      <tr key={job.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-semibold text-slate-900">{job.id}</td>
+                      <td className="px-3 py-2 text-slate-700">{statusPill(job.status)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatDateTime(job.createdAt)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatDateTime(job.updatedAt)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.totalRawTickers ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.totalProcessed ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.dbHits ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.newCalculated ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {job.error ? <span className="text-red-600">{job.error}</span> : "-"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex min-w-[140px] flex-col gap-1">
+                          <div className="h-2 w-full rounded-full bg-slate-100">
+                            <div
+                              className="h-2 rounded-full bg-emerald-500 transition-all"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span>{progress}%</span>
+                            <span>ETA {formatDuration(etaMs)}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {(job.status === "queued" || job.status === "running") && (
+                          <BaseButton
+                            variant="outline"
+                            color="danger"
+                            size="sm"
+                            startIcon={<AppIcon icon="mdi:close-circle-outline" />}
+                            onClick={async () => {
+                              try {
+                                await cancelTickerScanJob(job.id);
+                                loadJobs();
+                              } catch (err: any) {
+                                setActionStatus(err?.message || "Errore cancellazione job");
+                              }
+                            }}
+                          >
+                            Cancel task
+                          </BaseButton>
+                        )}
+                      </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
-      {status === "error" && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {error}
-        </div>
-      )}
-
-      {rows.length === 0 && status !== "loading" && (
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
-          Nessun job attivo al momento.
-        </div>
-      )}
-
-      {rows.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-slate-200 text-xs">
-            <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Job ID</th>
-                <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="px-3 py-2 font-semibold">Created</th>
-                <th className="px-3 py-2 font-semibold">Updated</th>
-                <th className="px-3 py-2 font-semibold text-right">Total</th>
-                <th className="px-3 py-2 font-semibold text-right">Processed</th>
-                <th className="px-3 py-2 font-semibold text-right">DB hits</th>
-                <th className="px-3 py-2 font-semibold text-right">New calc</th>
-                <th className="px-3 py-2 font-semibold">Error</th>
-                <th className="px-3 py-2 font-semibold text-right">Azione</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((job) => (
-                <tr key={job.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-2 font-semibold text-slate-900">{job.id}</td>
-                  <td className="px-3 py-2 text-slate-700">{statusPill(job.status)}</td>
-                  <td className="px-3 py-2 text-slate-700">{formatDateTime(job.createdAt)}</td>
-                  <td className="px-3 py-2 text-slate-700">{formatDateTime(job.updatedAt)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{job.totalRawTickers ?? "-"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{job.totalProcessed ?? "-"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{job.dbHits ?? "-"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{job.newCalculated ?? "-"}</td>
-                  <td className="px-3 py-2 text-slate-700">
-                    {job.error ? <span className="text-red-600">{job.error}</span> : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {(job.status === "queued" || job.status === "running") && (
-                      <BaseButton
-                        variant="outline"
-                        color="danger"
-                        size="sm"
-                        startIcon={<AppIcon icon="mdi:close-circle-outline" />}
-                        onClick={async () => {
-                          try {
-                            await cancelTickerScanJob(job.id);
-                            loadJobs();
-                          } catch (err: any) {
-                            setActionStatus(err?.message || "Errore cancellazione job");
-                          }
-                        }}
-                      >
-                        Cancel task
-                      </BaseButton>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {scanTab === "ended" && (
+        <div className="rounded-lg border border-slate-200 bg-white/70 shadow-sm">
+          <div className="flex items-center justify-between px-3 py-2">
+            <div>
+              <div className="text-xs font-semibold text-slate-700">Storico processi</div>
+              <div className="text-[11px] text-slate-500">Ultimi job completati o falliti</div>
+            </div>
+            <BaseButton
+              variant="outline"
+              color="neutral"
+              size="sm"
+              startIcon={<AppIcon icon="mdi:refresh" />}
+              onClick={loadEndedScanJobs}
+              disabled={endedScanStatus === "loading"}
+            >
+              Aggiorna
+            </BaseButton>
+          </div>
+          {endedScanStatus === "error" && (
+            <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+              Errore nel recupero dei job
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <div className="max-h-72 overflow-y-auto">
+              <table className="min-w-full table-fixed divide-y divide-slate-200 text-[11px] text-slate-700">
+                <colgroup>
+                  <col style={{ width: "7rem" }} />
+                  <col style={{ width: "6rem" }} />
+                  <col style={{ width: "5rem" }} />
+                  <col style={{ width: "5rem" }} />
+                  <col style={{ width: "5rem" }} />
+                  <col style={{ width: "5rem" }} />
+                  <col style={{ width: "7rem" }} />
+                  <col style={{ width: "7rem" }} />
+                  <col style={{ width: "6rem" }} />
+                </colgroup>
+                <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Date</th>
+                    <th className="px-3 py-2 font-semibold">Status</th>
+                    <th className="px-3 py-2 font-semibold text-right">Total</th>
+                    <th className="px-3 py-2 font-semibold text-right">Processed</th>
+                    <th className="px-3 py-2 font-semibold text-right">DB Hits</th>
+                    <th className="px-3 py-2 font-semibold text-right">New</th>
+                    <th className="px-3 py-2 font-semibold">Started</th>
+                    <th className="px-3 py-2 font-semibold">Finished</th>
+                    <th className="px-3 py-2 font-semibold text-right">Azioni</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {endedScanStatus === "loading" && (
+                    <tr>
+                      <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={9}>
+                        Caricamento...
+                      </td>
+                    </tr>
+                  )}
+                  {endedScanStatus !== "loading" && endedScanJobs.length === 0 && (
+                    <tr>
+                      <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={9}>
+                        Nessun job disponibile
+                      </td>
+                    </tr>
+                  )}
+                  {endedScanJobs.map((job) => (
+                    <tr key={job.id ?? job.job_id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2">{formatDateTime(job.created_at)}</td>
+                      <td className="px-3 py-2">{statusPill(job.status)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.total_raw_tickers ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.total_processed ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.db_hits ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{job.new_calculated ?? "-"}</td>
+                      <td className="px-3 py-2">{formatDateTime(job.started_at)}</td>
+                      <td className="px-3 py-2">{formatDateTime(job.finished_at)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className="rounded-full p-1 text-slate-600 hover:bg-slate-100"
+                            onClick={() => setScanDetailJob(job)}
+                            aria-label="Dettagli job"
+                          >
+                            <AppIcon icon="mdi:eye-outline" />
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-full p-1 text-red-600 hover:bg-red-50"
+                            onClick={() => setScanDeleteJob(job)}
+                            aria-label="Elimina job"
+                          >
+                            <AppIcon icon="mdi:delete-outline" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
@@ -392,12 +580,24 @@ export default function TickerScannerAdminPage() {
                     <th className="px-3 py-2 font-semibold text-right">Inserted</th>
                     <th className="px-3 py-2 font-semibold text-right">Updated</th>
                     <th className="px-3 py-2 font-semibold text-right">Errors</th>
+                    <th className="px-3 py-2 font-semibold">Progress</th>
                     <th className="px-3 py-2 font-semibold text-right">Azione</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {marketJobs.map((job) => (
-                    <tr key={job.id} className="hover:bg-slate-50">
+                  {marketJobs.map((job) => {
+                    const total = Number(job.totalSymbols || 0);
+                    const processed = Number(job.processed || 0);
+                    const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+                    const startedAt = job.startedAt || job.createdAt;
+                    const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : null;
+                    const etaMs =
+                      elapsedMs && processed > 0 && total > processed
+                        ? (elapsedMs / processed) * (total - processed)
+                        : null;
+
+                    return (
+                      <tr key={job.id} className="hover:bg-slate-50">
                       <td className="px-3 py-2 font-semibold text-slate-900">{job.id}</td>
                       <td className="px-3 py-2 text-slate-700">{statusPill(job.status)}</td>
                       <td className="px-3 py-2 text-slate-700">{formatDateTime(job.createdAt)}</td>
@@ -408,6 +608,20 @@ export default function TickerScannerAdminPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{job.updated ?? "-"}</td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.length : "-"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex min-w-[140px] flex-col gap-1">
+                          <div className="h-2 w-full rounded-full bg-slate-100">
+                            <div
+                              className="h-2 rounded-full bg-emerald-500 transition-all"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span>{progress}%</span>
+                            <span>ETA {formatDuration(etaMs)}</span>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-right">
                         {(job.status === "queued" || job.status === "running") && (
@@ -430,7 +644,7 @@ export default function TickerScannerAdminPage() {
                         )}
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>
@@ -588,12 +802,24 @@ export default function TickerScannerAdminPage() {
                 <th className="px-3 py-2 font-semibold text-right">Saved</th>
                 <th className="px-3 py-2 font-semibold text-right">Total</th>
                 <th className="px-3 py-2 font-semibold text-right">Errors</th>
+                <th className="px-3 py-2 font-semibold">Progress</th>
                 <th className="px-3 py-2 font-semibold text-right">Azione</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {userDailyJobs.map((job) => (
-                <tr key={job.id} className="hover:bg-slate-50">
+              {userDailyJobs.map((job) => {
+                const total = Number(job.total || 0);
+                const processed = Number(job.saved ?? job.processed ?? 0);
+                const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+                const startedAt = job.startedAt || job.createdAt;
+                const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : null;
+                const etaMs =
+                  elapsedMs && processed > 0 && total > processed
+                    ? (elapsedMs / processed) * (total - processed)
+                    : null;
+
+                return (
+                  <tr key={job.id} className="hover:bg-slate-50">
                   <td className="px-3 py-2 font-semibold text-slate-900">{job.id}</td>
                   <td className="px-3 py-2 text-slate-700">{statusPill(job.status)}</td>
                   <td className="px-3 py-2 text-slate-700">{job.date || "-"}</td>
@@ -602,6 +828,20 @@ export default function TickerScannerAdminPage() {
                   <td className="px-3 py-2 text-right tabular-nums">{job.total ?? "-"}</td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.length : "-"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex min-w-[140px] flex-col gap-1">
+                      <div className="h-2 w-full rounded-full bg-slate-100">
+                        <div
+                          className="h-2 rounded-full bg-emerald-500 transition-all"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-500">
+                        <span>{progress}%</span>
+                        <span>ETA {formatDuration(etaMs)}</span>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-3 py-2 text-right">
                     {(job.status === "queued" || job.status === "running") && (
@@ -623,8 +863,9 @@ export default function TickerScannerAdminPage() {
                       </BaseButton>
                     )}
                   </td>
-                </tr>
-              ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -908,6 +1149,103 @@ export default function TickerScannerAdminPage() {
                     await deleteUserDailyScoreJob(deleteJob.id);
                     setEndedUserDailyJobs((prev) => prev.filter((row) => row.id !== deleteJob.id));
                     setDeleteJob(null);
+                  } catch (err) {
+                    setActionStatus("Errore eliminazione record");
+                  }
+                }}
+              >
+                Elimina
+              </BaseButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {scanDetailJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
+            <div className="text-sm font-semibold text-slate-900">
+              Job {scanDetailJob.job_id ?? scanDetailJob.id ?? "-"}
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-700">
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">Status</div>
+                <div className="mt-1">{statusPill(scanDetailJob.status)}</div>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">Created</div>
+                <div className="mt-1">{formatDateTime(scanDetailJob.created_at)}</div>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">Total</div>
+                <div className="mt-1">{scanDetailJob.total_raw_tickers ?? "-"}</div>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">Processed</div>
+                <div className="mt-1">{scanDetailJob.total_processed ?? "-"}</div>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">DB Hits</div>
+                <div className="mt-1">{scanDetailJob.db_hits ?? "-"}</div>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">New calc</div>
+                <div className="mt-1">{scanDetailJob.new_calculated ?? "-"}</div>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">Started</div>
+                <div className="mt-1">{formatDateTime(scanDetailJob.started_at)}</div>
+              </div>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-600">Finished</div>
+                <div className="mt-1">{formatDateTime(scanDetailJob.finished_at)}</div>
+              </div>
+            </div>
+            <div className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
+              <div className="font-semibold text-slate-600">Errors JSON</div>
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap">
+{JSON.stringify(scanDetailJob.errors_json ?? [], null, 2)}
+              </pre>
+            </div>
+            <div className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
+              <div className="font-semibold text-slate-600">Params JSON</div>
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap">
+{JSON.stringify(scanDetailJob.params_json ?? {}, null, 2)}
+              </pre>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <BaseButton variant="outline" color="neutral" size="sm" onClick={() => setScanDetailJob(null)}>
+                Chiudi
+              </BaseButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {scanDeleteJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl">
+            <div className="text-sm font-semibold text-slate-900">Elimina record</div>
+            <div className="mt-2 text-xs text-slate-600">
+              Confermi l&apos;eliminazione del job {scanDeleteJob.job_id ?? scanDeleteJob.id ?? "-"}?
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <BaseButton variant="outline" color="neutral" size="sm" onClick={() => setScanDeleteJob(null)}>
+                Annulla
+              </BaseButton>
+              <BaseButton
+                variant="solid"
+                color="danger"
+                size="sm"
+                onClick={async () => {
+                  if (!scanDeleteJob.id) {
+                    setActionStatus("ID record mancante");
+                    return;
+                  }
+                  try {
+                    await deleteTickerScanJobHistory(scanDeleteJob.id);
+                    setEndedScanJobs((prev) => prev.filter((row) => row.id !== scanDeleteJob.id));
+                    setScanDeleteJob(null);
                   } catch (err) {
                     setActionStatus("Errore eliminazione record");
                   }
