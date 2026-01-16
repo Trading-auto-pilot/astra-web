@@ -692,6 +692,15 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   }, [useUserFundamentals]);
 
   useEffect(() => {
+    if (useUserFundamentals) return;
+    if (selectedDate === "today") return;
+    if (!availableDates.length) return;
+    if (!availableDates.includes(selectedDate)) {
+      setSelectedDate("today");
+    }
+  }, [useUserFundamentals, selectedDate, availableDates]);
+
+  useEffect(() => {
     if (!useUserFundamentals || !selectedPipeId) {
       return;
     }
@@ -993,6 +1002,11 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const viewRecords = useMemo(
     () => (useUserFundamentals ? applyUserFilters(records, userFilters) : records),
     [records, useUserFundamentals, userFilters]
+  );
+  const activeUserFilters = useMemo(() => userFilters.some((f) => f?.enabled), [userFilters]);
+  const filteredOutCount = useMemo(
+    () => (useUserFundamentals && activeUserFilters ? Math.max(0, records.length - viewRecords.length) : 0),
+    [records.length, viewRecords.length, useUserFundamentals, activeUserFilters]
   );
 
   useEffect(() => {
@@ -2530,9 +2544,9 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
             </div>
           </div>
         </div>
-        {useUserFundamentals && (
+        {useUserFundamentals && activeUserFilters && (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-            Sono attivi gli User Filters. Puoi modificarli in{" "}
+            Sono attivi gli User Filters. Filtrati {filteredOutCount} record su {records.length} (rimasti {viewRecords.length}). Puoi modificarli in{" "}
             <a href="#/dashboard/user-settings?tab=filters" className="font-semibold underline">
               Dashboard / User Settings / Filters
             </a>
