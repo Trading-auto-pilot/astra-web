@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import dayjs, { type Dayjs } from "dayjs";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { DatePicker, LocalizationProvider, PickersDay } from "@mui/x-date-pickers";
+import type { PickersDayProps } from "@mui/x-date-pickers/PickersDay";
 import {
   fetchFundamentals,
   fetchFmpVariant,
@@ -168,6 +172,29 @@ const getDoubleTopScore = (record: FundamentalRecord): number | null => {
 
 type UserFilter = { name: string; value?: number | null; comparator?: string; enabled?: boolean };
 
+type HighlightedDayProps = PickersDayProps<Dayjs> & { highlightedDays?: Set<string> };
+
+const HighlightedDay = (props: HighlightedDayProps) => {
+  const { day, highlightedDays, ...other } = props;
+  const key = day.format("YYYY-MM-DD");
+  const isHighlighted = highlightedDays?.has(key);
+  return (
+    <PickersDay
+      {...other}
+      day={day}
+      sx={
+        isHighlighted
+          ? {
+              fontWeight: 700,
+              border: "1px solid #0f766e",
+              backgroundColor: "rgba(20, 184, 166, 0.08)",
+            }
+          : undefined
+      }
+    />
+  );
+};
+
 const FILTER_FIELD_MAP: Record<string, string[]> = {
   growthProbability: [
     "user_grow_score",
@@ -288,11 +315,17 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
     "momentum_json.components.doubleTop.score",
   ],
   momentum_score: ["user_momentum_score", "momentum_score", "momentumScore"],
+  momentumScore: ["user_momentum_score", "momentum_score", "momentumScore"],
   momentum_score_short: ["momentum_score_short", "momentum_short_score", "momentumShortScore"],
+  momentumScoreShort: ["momentum_score_short", "momentum_short_score", "momentumScoreShort"],
   quality_score: ["user_quality_score", "quality_score", "qualityScore"],
+  qualityScore: ["user_quality_score", "quality_score", "qualityScore"],
   valuation_score: ["user_valuation_score", "valuation_score", "valuation_scores", "valuationScore"],
+  valuationScore: ["user_valuation_score", "valuation_score", "valuation_scores", "valuationScore"],
   risk_score: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
+  riskScore: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
   total_score: ["total_score", "score", "totalScore"],
+  totalScore: ["total_score", "score", "totalScore"],
   market_risk_score: [
     "market_risk_score",
     "marketRiskScore",
@@ -307,6 +340,42 @@ const FILTER_FIELD_MAP: Record<string, string[]> = {
     "user_market_score",
     "momentum_json.components.marketRisk.score",
     "momentum.components.marketRisk.score",
+  ],
+  marketRiskScore: [
+    "market_risk_score",
+    "marketRiskScore",
+    "user_market_score",
+    "market_score",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
+  marketScore: [
+    "market_score",
+    "marketScore",
+    "user_market_score",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
+  "Momentum score": ["user_momentum_score", "momentum_score", "momentumScore"],
+  "Momentum short score": ["momentum_score_short", "momentum_short_score", "momentumScoreShort"],
+  "Quality score": ["user_quality_score", "quality_score", "qualityScore"],
+  "Valuation score": ["user_valuation_score", "valuation_score", "valuation_scores", "valuationScore"],
+  "Risk score": ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
+  "Total score": ["total_score", "score", "totalScore"],
+  "Market risk score": [
+    "market_risk_score",
+    "marketRiskScore",
+    "user_market_score",
+    "market_score",
+    "momentum_json.components.marketRisk.score",
+    "momentum.components.marketRisk.score",
+  ],
+  "Growth probability": [
+    "user_grow_score",
+    "grow_score",
+    "growth_probability",
+    "growthProbability",
+    "user_growth_probability",
   ],
 };
 
@@ -420,6 +489,10 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("today");
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const highlightedDays = useMemo(
+    () => new Set(availableDates.filter((d) => d && d !== "today")),
+    [availableDates]
+  );
   const [scoresMissingMessage, setScoresMissingMessage] = useState<string | null>(null);
   const [marketDailyCompare, setMarketDailyCompare] = useState<Record<string, any>>({});
   const [pipes, setPipes] = useState<Array<{ id: number; name?: string; enabled?: boolean }>>([]);
@@ -949,13 +1022,29 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
           "doubletopScore",
           "double_top_score",
           "momentum_score",
+          "momentumScore",
           "momentum_score_short",
+          "momentumScoreShort",
           "risk_score",
+          "riskScore",
           "quality_score",
+          "qualityScore",
           "valuation_score",
+          "valuationScore",
           "total_score",
+          "totalScore",
           "market_risk_score",
+          "marketRiskScore",
           "market_score",
+          "marketScore",
+          "Momentum score",
+          "Momentum short score",
+          "Quality score",
+          "Risk score",
+          "Valuation score",
+          "Total score",
+          "Market risk score",
+          "Growth probability",
         ]);
         const filtered = rows.filter((r: any) => allowed.has(r.filter_name || r.name));
         setUserFilters(
@@ -2482,28 +2571,53 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
               <label className="sr-only" htmlFor="asof-filter">
                 Seleziona giornata
               </label>
-              <input
-                id="asof-filter"
-                type="date"
-                value={selectedDate === "today" ? todayIso : selectedDate}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (!val || val === todayIso) {
-                    setSelectedDate("today");
-                  } else {
-                    setSelectedDate(val);
-                  }
-                }}
-                list="asof-date-options"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-inner focus:border-slate-300 focus:outline-none"
-              />
-              <datalist id="asof-date-options">
-                {availableDates
-                  .filter((d) => d !== "today")
-                  .map((d) => (
-                    <option key={d} value={d} />
-                  ))}
-              </datalist>
+              <LocalizationProvider dateAdapter={AdapterDayjs}>
+                <DatePicker
+                  value={selectedDate === "today" ? dayjs(todayIso) : dayjs(selectedDate)}
+                  onChange={(newValue) => {
+                    if (!newValue || !newValue.isValid()) {
+                      setSelectedDate("today");
+                      return;
+                    }
+                    const val = newValue.format("YYYY-MM-DD");
+                    if (val === todayIso) {
+                      setSelectedDate("today");
+                    } else {
+                      setSelectedDate(val);
+                    }
+                  }}
+                  format="YYYY-MM-DD"
+                  slots={{
+                    day: (props) => <HighlightedDay {...props} highlightedDays={highlightedDays} />,
+                  }}
+                  slotProps={{
+                    textField: {
+                      id: "asof-filter",
+                      size: "small",
+                      sx: {
+                        minWidth: 170,
+                        "& .MuiInputBase-root": {
+                          borderRadius: "0.5rem",
+                          backgroundColor: "#ffffff",
+                          fontSize: "0.875rem",
+                        },
+                        "& .MuiInputBase-input": {
+                          padding: "8px 12px",
+                        },
+                        "& .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "#e2e8f0",
+                        },
+                        "& .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "#cbd5f5",
+                        },
+                        "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "#94a3b8",
+                        },
+                      },
+                    },
+                  }}
+                />
+              </LocalizationProvider>
               <label className="sr-only" htmlFor="industry-filter">
                 Filtra per industria
               </label>

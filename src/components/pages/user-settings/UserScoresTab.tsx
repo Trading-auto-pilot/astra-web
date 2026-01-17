@@ -111,9 +111,6 @@ export default function UserScoresTab() {
   const [dragScore, setDragScore] = useState<string | null>(null);
   const [qualityHandles, setQualityHandles] = useState<number[]>([35, 60, 85]); // 35/25/25/15
   const qualityColors = ["#22c55e", "#a855f7", "#06b6d4", "#f97316"];
-  const [qualityFilterEnabled, setQualityFilterEnabled] = useState(false);
-  const [qualityFilterValue, setQualityFilterValue] = useState(70);
-  const [qualityFilterComp, setQualityFilterComp] = useState<"GT" | "LT">("GT");
   const [momentumHandles, setMomentumHandles] = useState<number[]>([50, 80]); // 50/30/20
   const momentumColors = ["#6366f1", "#22c55e", "#f59e0b"];
   const handlesToMomentumWeights = (handles: number[]) => {
@@ -124,9 +121,6 @@ export default function UserScoresTab() {
       w120: Math.max(0, 100 - h2),
     };
   };
-  const [momentumFilterEnabled, setMomentumFilterEnabled] = useState(false);
-  const [momentumFilterValue, setMomentumFilterValue] = useState(70);
-  const [momentumFilterComp, setMomentumFilterComp] = useState<Comparator>("GT");
   const [momentumShortHandles, setMomentumShortHandles] = useState<number[]>([60]); // 60/40
   const [riskHandles, setRiskHandles] = useState<number[]>([40, 75]); // 40/35/25
   const [valuationHandles, setValuationHandles] = useState<number[]>([40, 70]); // 40/30/30
@@ -836,12 +830,12 @@ const SCORE_DEFAULTS: Record<string, { enabled: boolean; value: number; comp: Co
                           handles={qualityHandles}
                           setHandles={setQualityHandles}
                           filterLabel="Lista solo i tick con Quality score sopra/sotto soglia"
-                          filterEnabled={qualityFilterEnabled}
-                          setFilterEnabled={setQualityFilterEnabled}
-                          filterValue={qualityFilterValue}
-                          setFilterValue={setQualityFilterValue}
-                          filterComp={qualityFilterComp}
-                          setFilterComp={setQualityFilterComp}
+                          filterEnabled={genericFilters["Quality score"]?.enabled ?? false}
+                          setFilterEnabled={(v) => updateGenericFilter("Quality score", { enabled: v })}
+                          filterValue={genericFilters["Quality score"]?.value ?? 70}
+                          setFilterValue={(v) => updateGenericFilter("Quality score", { value: v })}
+                          filterComp={genericFilters["Quality score"]?.comp ?? "GT"}
+                          setFilterComp={(c) => updateGenericFilter("Quality score", { comp: c })}
                           includeOrderEnabled={genericFilters[s]?.inOrder ?? false}
                           setIncludeOrderEnabled={(v) => updateGenericFilter(s, { inOrder: v })}
                         />
@@ -864,12 +858,12 @@ const SCORE_DEFAULTS: Record<string, { enabled: boolean; value: number; comp: Co
                           handles={momentumHandles}
                           setHandles={setMomentumHandles}
                           filterLabel="Lista solo i tick con Momentum score sopra/sotto soglia"
-                          filterEnabled={momentumFilterEnabled}
-                          setFilterEnabled={setMomentumFilterEnabled}
-                          filterValue={momentumFilterValue}
-                          setFilterValue={setMomentumFilterValue}
-                          filterComp={momentumFilterComp}
-                          setFilterComp={setMomentumFilterComp}
+                          filterEnabled={genericFilters["Momentum score"]?.enabled ?? false}
+                          setFilterEnabled={(v) => updateGenericFilter("Momentum score", { enabled: v })}
+                          filterValue={genericFilters["Momentum score"]?.value ?? 70}
+                          setFilterValue={(v) => updateGenericFilter("Momentum score", { value: v })}
+                          filterComp={genericFilters["Momentum score"]?.comp ?? "GT"}
+                          setFilterComp={(c) => updateGenericFilter("Momentum score", { comp: c })}
                           includeOrderEnabled={genericFilters[s]?.inOrder ?? false}
                           setIncludeOrderEnabled={(v) => updateGenericFilter(s, { inOrder: v })}
                         />
