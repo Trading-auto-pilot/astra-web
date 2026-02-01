@@ -121,11 +121,21 @@ export async function fetchFundamentals(): Promise<FundamentalRecord[]> {
   return extractRecords(data);
 }
 
-export async function fetchUserFundamentalsView(): Promise<FundamentalRecord[]> {
+export async function fetchUserFundamentalsView(
+  pipeId?: number | string,
+  options?: { date?: string }
+): Promise<{ records: FundamentalRecord[]; meta?: Record<string, unknown> }> {
   const token =
     typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
 
-  const response = await fetch(USER_FUNDAMENTALS_VIEW_ENDPOINT, {
+  const params = new URLSearchParams();
+  if (options?.date) params.set("date", options.date);
+  const url = pipeId
+    ? `${USER_FUNDAMENTALS_VIEW_ENDPOINT}/${encodeURIComponent(String(pipeId))}${
+        params.toString() ? `?${params.toString()}` : ""
+      }`
+    : `${USER_FUNDAMENTALS_VIEW_ENDPOINT}${params.toString() ? `?${params.toString()}` : ""}`;
+  const response = await fetch(url, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -140,7 +150,7 @@ export async function fetchUserFundamentalsView(): Promise<FundamentalRecord[]> 
     throw new Error(typeof message === "string" ? message : "Unable to load user fundamentals");
   }
 
-  return extractRecords(data);
+  return { records: extractRecords(data), meta: (data as any)?.meta };
 }
 
 export async function fetchFundamentalsHistory(params?: { symbol?: string; days?: number }) {

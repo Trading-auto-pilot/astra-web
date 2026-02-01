@@ -55,6 +55,9 @@ export default function MicroserviceGeneralTab({
   const [logLevel, setLogLevel] = useState<string | null>(null);
   const [logLevelStatus, setLogLevelStatus] = useState<Status>("idle");
   const [logLevelError, setLogLevelError] = useState<string | null>(null);
+  const [provider, setProvider] = useState<string | null>(null);
+  const [providerStatus, setProviderStatus] = useState<Status>("idle");
+  const [providerError, setProviderError] = useState<string | null>(null);
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [settingsStatus, setSettingsStatus] = useState<Status>("idle");
@@ -260,6 +263,19 @@ export default function MicroserviceGeneralTab({
           .catch((err: any) => {
             setSettingsError(err?.message || "Errore nel leggere i settings");
             setSettingsStatus("error");
+          });
+
+        setProviderStatus("loading");
+        setProviderError(null);
+        apiGet("provider")
+          .then((data) => {
+            const current = (data as any)?.provider ?? (data as any)?.data ?? null;
+            setProvider(current);
+            setProviderStatus("idle");
+          })
+          .catch((err: any) => {
+            setProviderError(err?.message || "Errore nel leggere il provider");
+            setProviderStatus("error");
           });
       } else {
         setSettings(null);
@@ -571,6 +587,50 @@ export default function MicroserviceGeneralTab({
                         <div className="mt-1 text-[11px] text-slate-500">Seleziona il livello di log del microservizio.</div>
                       </td>
                     </tr>
+                    <tr>
+                      <td className="pr-3 font-semibold text-slate-600">Data Provider</td>
+                      <td className="py-1">
+                        {isCache ? (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-3">
+                              {["ALPACA", "FMP", "IBKR"].map((opt) => (
+                                <label key={opt} className="inline-flex items-center gap-2 text-xs text-slate-700">
+                                  <input
+                                    type="radio"
+                                    name="data-provider"
+                                    value={opt}
+                                    checked={provider === opt}
+                                    disabled={providerStatus === "loading"}
+                                    onChange={async () => {
+                                      setProviderError(null);
+                                      setProviderStatus("loading");
+                                      try {
+                                        const data = await apiSend("PUT", `provider/${opt}`);
+                                        const next = (data as any)?.provider ?? opt;
+                                        setProvider(next);
+                                        setProviderStatus("idle");
+                                      } catch (err: any) {
+                                        setProviderError(err?.message || "Errore aggiornando il provider");
+                                        setProviderStatus("error");
+                                      }
+                                    }}
+                                  />
+                                  <span>{opt}</span>
+                                </label>
+                              ))}
+                              {providerStatus === "loading" && (
+                                <span className="text-[11px] text-slate-500">Aggiornamento...</span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              Seleziona il provider storico usato dal cacheManager.
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-500">-</span>
+                        )}
+                      </td>
+                    </tr>
                   </>
                 )}
                 <tr>
@@ -584,6 +644,9 @@ export default function MicroserviceGeneralTab({
             )}
             {logLevelError && (
               <div className="mt-2 text-[11px] text-amber-700">{logLevelError}</div>
+            )}
+            {providerError && (
+              <div className="mt-2 text-[11px] text-amber-700">{providerError}</div>
             )}
           </div>
           <div className="flex w-full flex-col gap-2 md:w-auto">
