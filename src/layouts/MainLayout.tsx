@@ -4,6 +4,7 @@ import UserMenu from "../components/molecules/navigation/UserMenu";
 import { useRelease } from "../hooks/useReleaseInfo";
 import BaseButton from "../components/atoms/base/buttons/BaseButton";
 import { fetchServiceFlags } from "../api/serviceFlags";
+import { env } from "../config/env";
 
 export type MainLayoutProps = {
   children: ReactNode;
@@ -127,6 +128,35 @@ export function MainLayout({
   const [showReleaseModal, setShowReleaseModal] = useState(false);
   const [microservices, setMicroservices] = useState<string[]>([]);
   const [microserviceMenuOpen, setMicroserviceMenuOpen] = useState(false);
+  const [gwStatus, setGwStatus] = useState("UNKNOWN");
+  const [gwInfo, setGwInfo] = useState<Record<string, unknown> | null>(null);
+  const [showGwModal, setShowGwModal] = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [selectedAccountType, setSelectedAccountType] = useState<string | null>(null);
+  const getAuthToken = () =>
+    typeof localStorage === "undefined" ? null : localStorage.getItem("astraai:auth:token");
+
+  const statusIndicatorTone =
+    gwStatus === "GW_UP"
+      ? "bg-emerald-500"
+      : gwStatus === "GW_NO_AUTH"
+        ? "bg-amber-400"
+        : gwStatus === "GW_UP_BUT_ERROR"
+          ? "bg-amber-500"
+          : gwStatus === "GW_DOWN"
+            ? "bg-red-500"
+            : "bg-slate-400";
+  const statusIndicatorPulse = gwStatus === "GW_NO_AUTH" ? "status-indicator--blink" : "";
+
+  const computeGwStatus = (keepalive: any) => {
+    const authStatus = keepalive?.lastAuthStatus;
+    const tickleStatus = keepalive?.lastTickleStatus;
+    const status = typeof authStatus === "number" ? authStatus : tickleStatus;
+    if (status === 200) return "GW_UP";
+    if (status === 401) return "GW_NO_AUTH";
+    if (typeof status === "number") return "GW_UP_BUT_ERROR";
+    return "GW_DOWN";
+  };
 
   const closeNav = () => setOpenNav(false);
 
@@ -146,6 +176,68 @@ export function MainLayout({
       .catch(() => {
         setMicroservices([]);
       });
+  }, []);
+
+  useEffect(() => {
+    const readSelection = () => {
+      if (typeof localStorage === "undefined") return;
+      const accountId = localStorage.getItem("astraai:ibkr:accountId");
+      const accountType = localStorage.getItem("astraai:ibkr:accountType");
+      setSelectedAccountId(accountId);
+      setSelectedAccountType(accountType);
+    };
+
+    readSelection();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key || !event.key.startsWith("astraai:ibkr:")) return;
+      readSelection();
+    };
+    const handleCustom = () => readSelection();
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("ibkr-account-change", handleCustom as EventListener);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("ibkr-account-change", handleCustom as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    const fetchGwStatus = async () => {
+      try {
+        const token = getAuthToken();
+        const resp = await fetch(`${env.apiBaseUrl}/ibkr-keepalive/status/info`, {
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (!resp.ok) {
+          throw new Error("Status request failed");
+        }
+        const data = (await resp.json()) as Record<string, unknown>;
+        const status = computeGwStatus((data as any)?.keepalive);
+        if (isActive) {
+          setGwStatus(typeof status === "string" && status ? status : "UNKNOWN");
+          setGwInfo(data);
+        }
+      } catch {
+        if (isActive) {
+          setGwStatus("UNKNOWN");
+          setGwInfo(null);
+        }
+      }
+    };
+
+    fetchGwStatus();
+    const timer = window.setInterval(fetchGwStatus, 60000);
+    return () => {
+      isActive = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (
@@ -296,9 +388,39 @@ export function MainLayout({
         </header>
         <main className="flex-1 overflow-y-auto p-4 pb-16">{children}</main>
         <footer className="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between border-t border-slate-200 bg-white/90 px-3 py-2 text-[11px] text-slate-600 backdrop-blur">
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-slate-700">Status</span>
-            <span>App ready</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded px-2 py-1 transition hover:bg-slate-100"
+              onClick={() => setShowGwModal(true)}
+              aria-label="Apri dettaglio stato IBKR"
+            >
+              <span className="inline-flex items-center gap-2" title={`Gateway status: ${gwStatus}`}>
+                <span
+                  className={`status-indicator h-2.5 w-2.5 rounded-full ${statusIndicatorTone} ${statusIndicatorPulse}`}
+                  aria-hidden="true"
+                />
+                <span>{gwStatus}</span>
+              </span>
+            </button>
+            {selectedAccountId ? (
+              <span className="inline-flex items-center gap-2 rounded px-2 py-1 text-[11px] text-slate-600">
+                Connesso al conto {selectedAccountId}
+                {selectedAccountType ? (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold text-white ${
+                      selectedAccountType === "DEMO"
+                        ? "bg-red-500"
+                        : selectedAccountType === "INDIVIDUAL"
+                          ? "bg-emerald-500"
+                          : "bg-slate-500"
+                    }`}
+                  >
+                    {selectedAccountType}
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-3 text-slate-500">
             <button
@@ -339,6 +461,65 @@ export function MainLayout({
               <pre className="rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-800">
                 {JSON.stringify(release, null, 2)}
               </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGwModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <div className="text-base font-semibold text-slate-900">IBKR status</div>
+                <div className="text-[11px] text-slate-500">/ibkr-keepalive/status/info</div>
+              </div>
+            </div>
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto px-4 py-4 text-xs text-slate-700">
+              <div className="flex items-center gap-2">
+                <span className={`status-indicator h-2.5 w-2.5 rounded-full ${statusIndicatorTone}`} />
+                <span className="font-semibold">gwStatus</span>
+                <span>{gwStatus}</span>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {(() => {
+                  const keepalive = (gwInfo?.keepalive as Record<string, unknown>) || {};
+                  const rows: Array<{ label: string; value: unknown }> = [
+                    { label: "serviceStatus", value: gwInfo?.STATUS },
+                    { label: "serviceDetails", value: gwInfo?.STATUS_DETAILS },
+                    { label: "lastAuthStatus", value: keepalive.lastAuthStatus },
+                    { label: "lastTickleStatus", value: keepalive.lastTickleStatus },
+                    { label: "lastTickleAt", value: keepalive.lastTickleAt },
+                  ];
+
+                  return rows.map((row) => (
+                    <div key={row.label} className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="text-[10px] uppercase tracking-wide text-slate-400">{row.label}</div>
+                      <div className="mt-1 text-[12px] font-semibold text-slate-900">
+                        {row.value === null || row.value === undefined || row.value === ""
+                          ? "-"
+                          : String(row.value)}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              <BaseButton
+                variant="outline"
+                color="neutral"
+                onClick={() => setShowGwModal(false)}
+              >
+                Close
+              </BaseButton>
+              <BaseButton
+                variant="solid"
+                color="primary"
+                onClick={() => window.open("http://localhost:5001", "_blank", "noopener,noreferrer")}
+              >
+                Connect
+              </BaseButton>
             </div>
           </div>
         </div>

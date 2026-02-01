@@ -570,8 +570,16 @@ const SCORE_DEFAULTS: Record<string, { enabled: boolean; value: number; comp: Co
   };
 
   const onDragOver = (e: React.DragEvent) => {
-    if (!dragScore) return;
+    if (!dragScore && !e.dataTransfer.getData("text/plain")) return;
     e.preventDefault();
+  };
+
+  const onCardDrop = (targetScore: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const dragged = e.dataTransfer.getData("text/plain") || dragScore;
+    if (!dragged || dragged === targetScore) return;
+    movePlaced(dragged, targetScore);
+    setDragScore(null);
   };
 
   const movePlaced = (fromScore: string, toScore: string) => {
@@ -691,11 +699,8 @@ const SCORE_DEFAULTS: Record<string, { enabled: boolean; value: number; comp: Co
               <div
                 key={s}
                 className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 shadow-sm"
-                onDragOver={(e) => {
-                  if (!dragScore) return;
-                  e.preventDefault();
-                  if (dragScore && dragScore !== s) movePlaced(dragScore, s);
-                }}
+                onDragOver={onDragOver}
+                onDrop={onCardDrop(s)}
                 onDragEnd={() => setDragScore(null)}
               >
                 <div className="flex items-start gap-3">
@@ -705,6 +710,7 @@ const SCORE_DEFAULTS: Record<string, { enabled: boolean; value: number; comp: Co
                       draggable
                       onDragStart={(e) => {
                         setDragScore(s);
+                        e.dataTransfer.setData("text/plain", s);
                         e.dataTransfer.effectAllowed = "move";
                       }}
                     >

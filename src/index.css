@@ -1,3 +1,23 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.status-indicator {
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12);
+}
+
+@keyframes status-pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.status-indicator--blink {
+  animation: status-pulse 1.6s ease-in-out infinite;
+}

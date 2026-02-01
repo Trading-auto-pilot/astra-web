@@ -1,6 +1,6 @@
 {
-    "lastUpdate" : "17/01/2026",
-    "version": "3.1.2",
+    "lastUpdate" : "01/02/2026",
+    "version": "3.2.0",
     "note" : [  "1.0.0 First version test in PAPER environment",
                 "1.1.0 Fix  CliNav, added icons, added detailed tickers page",
                 "1.2.0 Improving detailed ticker page",
@@ -20,6 +20,7 @@
                 "3.0.0 Refactoring completo calcolo scores per utente e rerun storico",
                 "3.1.0 Aggiunta Progress bar task scan e storico per Tickers Scanner",
                 "3.1.1 Evidenza ricker filtrati e disponibili piu fix varie",
-                "3.1.2 Fix calendar picker and filters"
+                "3.1.2 Fix calendar picker and filters",
+                "3.2.0 Implementazione nuovi microservizi e funzionalitá"
             ]
 }

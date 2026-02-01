@@ -24,7 +24,7 @@ import {
   fetchFundamentalsHistory,
   fetchUserFundamentalsView,
 } from "../../api/fundamentals";
-import { fetchMarketDailyCompare, fetchScoresDailyByUser } from "../../api/tickerScanner";
+import { fetchMarketDailyCompare } from "../../api/tickerScanner";
 import SectionHeader from "../molecules/content/SectionHeader";
 import ReactApexChart from "react-apexcharts";
 import ReactCountryFlag from "react-country-flag";
@@ -170,8 +170,6 @@ const getDoubleTopScore = (record: FundamentalRecord): number | null => {
   return parsed?.doubleTopScore ?? null;
 };
 
-type UserFilter = { name: string; value?: number | null; comparator?: string; enabled?: boolean };
-
 type HighlightedDayProps = PickersDayProps<Dayjs> & { highlightedDays?: Set<string> };
 
 const HighlightedDay = (props: HighlightedDayProps) => {
@@ -193,290 +191,6 @@ const HighlightedDay = (props: HighlightedDayProps) => {
       }
     />
   );
-};
-
-const FILTER_FIELD_MAP: Record<string, string[]> = {
-  growthProbability: [
-    "user_grow_score",
-    "grow_score",
-    "growth_probability",
-    "growthProbability",
-    "user_growth_probability",
-  ],
-  growth_probability: [
-    "user_grow_score",
-    "grow_score",
-    "growth_probability",
-    "growthProbability",
-    "user_growth_probability",
-  ],
-  growthMomentum: ["user_momentum_score", "momentum_score", "momentumScore", "user_momentum"],
-  growth_momentum: ["user_momentum_score", "momentum_score", "momentumScore", "user_momentum"],
-  growthRisk: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
-  growth_risk: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
-  growthMarket: [
-    "user_market_score",
-    "market_score",
-    "marketScore",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  growth_market: [
-    "user_market_score",
-    "market_score",
-    "marketScore",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  mom1m: [
-    "user_mom1m_score",
-    "mom_1m",
-    "mom1m",
-    "momentum_1m",
-    "mom1mScore",
-    "momentum.components.mom1mScore",
-    "momentum_json.components.mom1mScore",
-  ],
-  mom_1m: [
-    "user_mom1m_score",
-    "mom_1m",
-    "mom1m",
-    "momentum_1m",
-    "mom1mScore",
-    "momentum.components.mom1mScore",
-    "momentum_json.components.mom1mScore",
-  ],
-  mom3m: [
-    "user_mom3m_score",
-    "mom_3m",
-    "mom3m",
-    "momentum_3m",
-    "mom3mScore",
-    "momentum.components.mom3mScore",
-    "momentum_json.components.mom3mScore",
-  ],
-  mom_3m: [
-    "user_mom3m_score",
-    "mom_3m",
-    "mom3m",
-    "momentum_3m",
-    "mom3mScore",
-    "momentum.components.mom3mScore",
-    "momentum_json.components.mom3mScore",
-  ],
-  mom6m: [
-    "user_mom6m_score",
-    "mom_6m",
-    "mom6m",
-    "momentum_6m",
-    "mom6mScore",
-    "momentum.components.mom6mScore",
-    "momentum_json.components.mom6mScore",
-  ],
-  mom_6m: [
-    "user_mom6m_score",
-    "mom_6m",
-    "mom6m",
-    "momentum_6m",
-    "mom6mScore",
-    "momentum.components.mom6mScore",
-    "momentum_json.components.mom6mScore",
-  ],
-  mom12m: [
-    "user_mom12m_score",
-    "mom_12m",
-    "mom12m",
-    "momentum_12m",
-    "mom12mScore",
-    "momentum.components.mom12mScore",
-    "momentum_json.components.mom12mScore",
-  ],
-  mom_12m: [
-    "user_mom12m_score",
-    "mom_12m",
-    "mom12m",
-    "momentum_12m",
-    "mom12mScore",
-    "momentum.components.mom12mScore",
-    "momentum_json.components.mom12mScore",
-  ],
-  doubletopScore: [
-    "user_double_top_score",
-    "double_top_score",
-    "doubletopScore",
-    "momentum.components.doubleTop.score",
-    "momentum_json.components.doubleTop.score",
-  ],
-  double_top_score: [
-    "user_double_top_score",
-    "double_top_score",
-    "doubletopScore",
-    "momentum.components.doubleTop.score",
-    "momentum_json.components.doubleTop.score",
-  ],
-  momentum_score: ["user_momentum_score", "momentum_score", "momentumScore"],
-  momentumScore: ["user_momentum_score", "momentum_score", "momentumScore"],
-  momentum_score_short: ["momentum_score_short", "momentum_short_score", "momentumShortScore"],
-  momentumScoreShort: ["momentum_score_short", "momentum_short_score", "momentumScoreShort"],
-  quality_score: ["user_quality_score", "quality_score", "qualityScore"],
-  qualityScore: ["user_quality_score", "quality_score", "qualityScore"],
-  valuation_score: ["user_valuation_score", "valuation_score", "valuation_scores", "valuationScore"],
-  valuationScore: ["user_valuation_score", "valuation_score", "valuation_scores", "valuationScore"],
-  risk_score: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
-  riskScore: ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
-  total_score: ["total_score", "score", "totalScore"],
-  totalScore: ["total_score", "score", "totalScore"],
-  market_risk_score: [
-    "market_risk_score",
-    "marketRiskScore",
-    "user_market_score",
-    "market_score",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  market_score: [
-    "market_score",
-    "marketScore",
-    "user_market_score",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  marketRiskScore: [
-    "market_risk_score",
-    "marketRiskScore",
-    "user_market_score",
-    "market_score",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  marketScore: [
-    "market_score",
-    "marketScore",
-    "user_market_score",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  "Momentum score": ["user_momentum_score", "momentum_score", "momentumScore"],
-  "Momentum short score": ["momentum_score_short", "momentum_short_score", "momentumScoreShort"],
-  "Quality score": ["user_quality_score", "quality_score", "qualityScore"],
-  "Valuation score": ["user_valuation_score", "valuation_score", "valuation_scores", "valuationScore"],
-  "Risk score": ["user_risk_score", "risk_score", "riskScore", "short_risk_score"],
-  "Total score": ["total_score", "score", "totalScore"],
-  "Market risk score": [
-    "market_risk_score",
-    "marketRiskScore",
-    "user_market_score",
-    "market_score",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  "Growth probability": [
-    "user_grow_score",
-    "grow_score",
-    "growth_probability",
-    "growthProbability",
-    "user_growth_probability",
-  ],
-};
-
-const ORDER_FIELD_MAP: Record<string, string[]> = {
-  growth_probability: ["user_grow_score", "grow_score", "growth_probability"],
-  growthProbability: ["user_grow_score", "grow_score", "growth_probability"],
-  momentum_score: ["user_momentum_score", "momentum_score"],
-  momentum_score_short: ["momentum_score_short", "momentum_short_score", "momentum_score_short"],
-  momentumScoreShort: ["momentum_score_short", "momentum_short_score", "momentum_score_short"],
-  risk_score: ["user_risk_score", "risk_score"],
-  quality_score: ["user_quality_score", "quality_score"],
-  total_score: ["total_score", "score", "totalScore"],
-  market_score: [
-    "user_market_score",
-    "market_score",
-    "momentum_json.components.marketRisk.score",
-    "momentum.components.marketRisk.score",
-  ],
-  mom1mScore: [
-    "user_mom1m_score",
-    "mom_1m",
-    "mom1m",
-    "momentum.components.mom1mScore",
-    "momentum_json.components.mom1mScore",
-  ],
-  mom3mScore: [
-    "user_mom3m_score",
-    "mom_3m",
-    "mom3m",
-    "momentum.components.mom3mScore",
-    "momentum_json.components.mom3mScore",
-  ],
-  mom6mScore: [
-    "user_mom6m_score",
-    "mom_6m",
-    "mom6m",
-    "momentum.components.mom6mScore",
-    "momentum_json.components.mom6mScore",
-  ],
-  mom12mScore: [
-    "user_mom12m_score",
-    "mom_12m",
-    "mom12m",
-    "momentum.components.mom12mScore",
-    "momentum_json.components.mom12mScore",
-  ],
-  double_top_score: [
-    "user_double_top_score",
-    "double_top_score",
-    "momentum.components.doubleTop.score",
-    "momentum_json.components.doubleTop.score",
-  ],
-};
-
-const getNumericField = (record: any, keys: string[]): number | null => {
-  const getByPath = (obj: any, path: string) => {
-    if (!obj || typeof obj !== "object") return undefined;
-    const parts = path.split(".");
-    let cur = obj;
-    for (const p of parts) {
-      if (cur && typeof cur === "object" && p in cur) {
-        cur = cur[p];
-      } else {
-        return undefined;
-      }
-    }
-    return cur;
-  };
-
-  for (const k of keys) {
-    let v: any;
-    if (k.includes(".")) {
-      v = getByPath(record, k);
-    } else if (k in record) {
-      v = record[k];
-    }
-    if (v === undefined) continue;
-    const num = typeof v === "string" ? Number(v) : (v as number);
-    if (Number.isFinite(num)) return num;
-  }
-  return null;
-};
-
-const applyUserFilters = (records: FundamentalRecord[], filters: UserFilter[]) => {
-  if (!Array.isArray(filters) || !filters.length) return records;
-  return records.filter((rec) => {
-    for (const f of filters) {
-      if (!f?.enabled) continue;
-      const targetKeys = FILTER_FIELD_MAP[f.name] || [];
-      if (!targetKeys.length) continue;
-      const recVal = getNumericField(rec as any, targetKeys);
-      // se il valore non è disponibile, il filtro non è soddisfatto
-      if (recVal === null) return false;
-      const filterVal = Number(f.value);
-      if (!Number.isFinite(filterVal)) continue;
-      const cmp = (f.comparator || "GT").toUpperCase() === "LT" ? "LT" : "GT";
-      if (cmp === "GT" && !(recVal >= filterVal)) return false;
-      if (cmp === "LT" && !(recVal <= filterVal)) return false;
-    }
-    return true;
-  });
 };
 
 export type TickersPageProps = {
@@ -505,6 +219,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
   const [sortKey, setSortKey] = useState<SortKey>("total");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(() => getHashSymbol());
   const [selectedRecord, setSelectedRecord] = useState<FundamentalRecord | null>(null);
+  const [userFundamentalsMeta, setUserFundamentalsMeta] = useState<Record<string, any> | null>(null);
   const [fmpInfo, setFmpInfo] = useState<any | null>(null);
   const [fmpStatus, setFmpStatus] = useState<"idle" | "loading" | "error" | "no-key">("idle");
   const [infoTab, setInfoTab] = useState<
@@ -540,7 +255,6 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     ratiosTtm: { docs: [], status: "idle" },
   });
   const [uiRestored, setUiRestored] = useState(false);
-  const [userFilters, setUserFilters] = useState<UserFilter[]>([]);
   const [userOrder, setUserOrder] = useState<{ field: string; direction: "ASC" | "DESC"; order_id?: number }[]>([]);
   const [showRadar, setShowRadar] = useState(true);
   const [showGrow, setShowGrow] = useState(true);
@@ -853,28 +567,23 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     const load = async () => {
       try {
         if (useUserFundamentals) {
-          if (selectedDate !== "today") {
-            if (!selectedPipeId) {
-              if (!active) return;
-              setRecords([]);
-              setScoresMissingMessage("Seleziona una pipe per caricare gli score della data.");
-              return;
-            }
-            const data = await fetchScoresDailyByUser(selectedPipeId, selectedDate);
+          if (!selectedPipeId) {
             if (!active) return;
-            setRecords(Array.isArray(data) ? data : []);
-            setScoresMissingMessage(
-              Array.isArray(data) && data.length === 0
-                ? "Non ci sono score per questa data. Avvia il calcolo per generare gli score."
-                : null
-            );
+            setRecords([]);
+            setScoresMissingMessage("Seleziona una pipe per caricare gli score.");
+            setUserFundamentalsMeta(null);
             return;
           }
-
-          const data = await fetchUserFundamentalsView();
+          const dateParam = selectedDate === "today" ? todayIso : selectedDate;
+          const data = await fetchUserFundamentalsView(selectedPipeId, { date: dateParam });
           if (!active) return;
-          setRecords(Array.isArray(data) ? data : []);
-          setScoresMissingMessage(null);
+          setRecords(Array.isArray(data?.records) ? data.records : []);
+          setUserFundamentalsMeta((data?.meta as Record<string, any>) || null);
+          setScoresMissingMessage(
+            Array.isArray(data?.records) && data.records.length === 0
+              ? "Non ci sono score per questa data. Avvia il calcolo per generare gli score."
+              : null
+          );
           return;
         }
 
@@ -912,6 +621,7 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
             ? err.message
             : "Errore durante il caricamento dei ticker";
         setError(message);
+        setUserFundamentalsMeta(null);
       } finally {
         if (active) setLoading(false);
       }
@@ -936,7 +646,6 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     if (!useUserFundamentals) {
       setPipes([]);
       setSelectedPipeId(null);
-      setUserFilters([]);
       setUserOrder([]);
       return;
     }
@@ -944,7 +653,6 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     if (!token) {
       setPipes([]);
       setSelectedPipeId(null);
-      setUserFilters([]);
       setUserOrder([]);
       return;
     }
@@ -963,7 +671,6 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
         setPipes(enabled);
         if (!enabled.length) {
           setSelectedPipeId(null);
-          setUserFilters([]);
           setUserOrder([]);
         } else if (selectedPipeId === null || !enabled.find((p: any) => p.id === selectedPipeId)) {
           setSelectedPipeId(enabled[0].id);
@@ -972,7 +679,6 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
         if (active) {
           setPipes([]);
           setSelectedPipeId(null);
-          setUserFilters([]);
           setUserOrder([]);
         }
       }
@@ -989,78 +695,10 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     if (!useUserFundamentals) return;
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     if (!token || selectedPipeId === null) {
-      setUserFilters([]);
       setUserOrder([]);
       return;
     }
     let active = true;
-
-    fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-filters/${encodeURIComponent(selectedPipeId)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((resp) => resp.json())
-      .then((data) => {
-        if (!active) return;
-        const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
-        const allowed = new Set([
-          "growthProbability",
-          "growth_probability",
-          "growthMomentum",
-          "growth_momentum",
-          "growthRisk",
-          "growth_risk",
-          "growthMarket",
-          "growth_market",
-          "mom1m",
-          "mom_1m",
-          "mom3m",
-          "mom_3m",
-          "mom6m",
-          "mom_6m",
-          "mom12m",
-          "mom_12m",
-          "doubletopScore",
-          "double_top_score",
-          "momentum_score",
-          "momentumScore",
-          "momentum_score_short",
-          "momentumScoreShort",
-          "risk_score",
-          "riskScore",
-          "quality_score",
-          "qualityScore",
-          "valuation_score",
-          "valuationScore",
-          "total_score",
-          "totalScore",
-          "market_risk_score",
-          "marketRiskScore",
-          "market_score",
-          "marketScore",
-          "Momentum score",
-          "Momentum short score",
-          "Quality score",
-          "Risk score",
-          "Valuation score",
-          "Total score",
-          "Market risk score",
-          "Growth probability",
-        ]);
-        const filtered = rows.filter((r: any) => allowed.has(r.filter_name || r.name));
-        setUserFilters(
-          filtered.map((r: any) => ({
-            name: r.filter_name || r.name,
-            value: Number(r.value),
-            comparator: (r.comparator || r.comp || "GT").toUpperCase(),
-            enabled: r.enabled === 1 || r.enabled === true || r.enabled === "1",
-          }))
-        );
-      })
-      .catch(() => {
-        if (active) {
-          setUserFilters([]);
-        }
-      });
 
     fetch(`${env.apiBaseUrl}/tickerscanner/fundamentals/user-order/${encodeURIComponent(selectedPipeId)}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -1088,15 +726,47 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
     };
   }, [useUserFundamentals, selectedPipeId]);
 
-  const viewRecords = useMemo(
-    () => (useUserFundamentals ? applyUserFilters(records, userFilters) : records),
-    [records, useUserFundamentals, userFilters]
-  );
-  const activeUserFilters = useMemo(() => userFilters.some((f) => f?.enabled), [userFilters]);
-  const filteredOutCount = useMemo(
-    () => (useUserFundamentals && activeUserFilters ? Math.max(0, records.length - viewRecords.length) : 0),
-    [records.length, viewRecords.length, useUserFundamentals, activeUserFilters]
-  );
+  const viewRecords = useMemo(() => records, [records]);
+
+  const resolveUserOrderValue = (item: FundamentalRecord, field: string) => {
+    const map: Record<string, string[]> = {
+      total_score: ["total_score", "totalScore", "score"],
+      momentum_score: ["user_momentum_score", "momentum_score", "momentumShortScore"],
+      momentum_score_short: ["momentum_score_short", "momentum_short_score", "momentumShortScore"],
+      quality_score: ["user_quality_score", "quality_score", "qualityScore"],
+      risk_score: ["user_risk_score", "risk_score", "short_risk_score"],
+      valuation_score: ["user_valuation_score", "valuation_score", "valuationScore", "valuation_scores"],
+      market_risk_score: ["market_risk_score", "marketRiskScore", "user_market_score", "market_score"],
+      market_score: ["user_market_score", "market_score", "market_risk_score", "marketRiskScore"],
+      growth_probability: ["user_grow_score", "grow_score", "growth_probability"],
+      growthProbability: ["user_grow_score", "grow_score", "growth_probability"],
+    };
+    const candidates = map[field] || [field];
+    for (const key of candidates) {
+      const parsed = parseScore((item as any)[key]);
+      if (parsed !== null) return parsed;
+    }
+    return null;
+  };
+
+  const applyUserOrderSorting = (items: FundamentalRecord[]) => {
+    if (!useUserFundamentals || userOrder.length === 0) return items;
+    const sorted = [...items];
+    sorted.sort((a, b) => {
+      for (const order of userOrder) {
+        const dir = order.direction === "ASC" ? 1 : -1;
+        const aVal = resolveUserOrderValue(a, order.field);
+        const bVal = resolveUserOrderValue(b, order.field);
+        if (aVal === null && bVal === null) continue;
+        if (aVal === null) return 1;
+        if (bVal === null) return -1;
+        if (aVal === bVal) continue;
+        return aVal > bVal ? dir : -dir;
+      }
+      return 0;
+    });
+    return sorted;
+  };
 
   useEffect(() => {
     if (!selectedSymbol) {
@@ -1611,44 +1281,33 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
       return null;
     };
 
+    if (useUserFundamentals) {
+      const ordered =
+        selectedDate !== "today" ? applyUserOrderSorting(countryFiltered) : countryFiltered;
+      return ordered.slice(0, 50);
+    }
+
     const sorted = [...countryFiltered];
-
-    if (useUserFundamentals && userOrder.length) {
-      sorted.sort((a, b) => {
-        for (const ord of userOrder) {
-          const mappedKeys = ORDER_FIELD_MAP[ord.field] || [ord.field];
-          const valA = getNumericField(a as any, mappedKeys);
-          const valB = getNumericField(b as any, mappedKeys);
-          const dir = ord.direction === "ASC" ? 1 : -1;
-          if (valA === null && valB === null) continue;
-          if (valA === null) return 1; // nulls last
-          if (valB === null) return -1;
-          if (valA !== valB) return (valA - valB) * dir;
-        }
-        return 0;
-      });
-    } else {
-      sorted.sort((a, b) => {
-        if (sortKey === "doubleTop") {
-          const aScore = getDoubleTopScore(a);
-          const bScore = getDoubleTopScore(b);
-          if (aScore === null && bScore === null) return 0;
-          if (aScore === null) return 1;
-          if (bScore === null) return -1;
-          return bScore - aScore;
-        }
-
-        const aScore = getScore(a, keys);
-        const bScore = getScore(b, keys);
+    sorted.sort((a, b) => {
+      if (sortKey === "doubleTop") {
+        const aScore = getDoubleTopScore(a);
+        const bScore = getDoubleTopScore(b);
         if (aScore === null && bScore === null) return 0;
         if (aScore === null) return 1;
         if (bScore === null) return -1;
         return bScore - aScore;
-      });
-    }
+      }
+
+      const aScore = getScore(a, keys);
+      const bScore = getScore(b, keys);
+      if (aScore === null && bScore === null) return 0;
+      if (aScore === null) return 1;
+      if (bScore === null) return -1;
+      return bScore - aScore;
+    });
 
     return sorted.slice(0, 50);
-  }, [viewRecords, sortKey, searchTerm, selectedIndustry, selectedCountry, useUserFundamentals, userOrder]);
+  }, [viewRecords, sortKey, searchTerm, selectedIndustry, selectedCountry, useUserFundamentals, selectedDate, userOrder]);
 
   const recordsCount = useMemo(() => viewRecords.length, [viewRecords]);
 
@@ -2658,18 +2317,16 @@ export function TickersPage({ useUserFundamentals = false }: TickersPageProps) {
             </div>
           </div>
         </div>
-        {useUserFundamentals && activeUserFilters && (
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-            Sono attivi gli User Filters. Filtrati {filteredOutCount} record su {records.length} (rimasti {viewRecords.length}). Puoi modificarli in{" "}
-            <a href="#/dashboard/user-settings?tab=filters" className="font-semibold underline">
-              Dashboard / User Settings / Filters
-            </a>
-            .
-          </div>
-        )}
         {viewRecords.length > 50 && (
           <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700">
             Nota: la lista mostra solo i primi 50 tickers (filtri e ordinamento applicati).
+          </div>
+        )}
+        {useUserFundamentals && userFundamentalsMeta?.total != null && (
+          <div className="mb-3 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
+            Filtrati {userFundamentalsMeta.filtered ?? "-"} su {userFundamentalsMeta.total} record ·
+            Filtri attivi: {userFundamentalsMeta.appliedFilters ?? 0} ·
+            Order attivo: {userFundamentalsMeta.appliedOrder ?? 0}
           </div>
         )}
         {scoresMissingMessage && (
