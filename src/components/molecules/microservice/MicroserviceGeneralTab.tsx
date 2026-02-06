@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import BaseButton from "../../atoms/base/buttons/BaseButton";
 import AppIcon from "../../atoms/icon/AppIcon";
 import MicroserviceLogsCard from "./MicroserviceLogsCard";
+import MicroserviceCommunicationChannelsCard from "./MicroserviceCommunicationChannelsCard";
+import MicroserviceDbSettingsCard from "./MicroserviceDbSettingsCard";
+import MicroserviceDataProviderCard from "./MicroserviceDataProviderCard";
+import MicroserviceIbkrBridgeCard from "./MicroserviceIbkrBridgeCard";
 import { env } from "../../../config/env";
 
 type Status = "idle" | "loading" | "error";
@@ -26,19 +30,6 @@ type Props = {
   onReleaseChange?: (rel: ReleaseInfo | null) => void;
   onHealthChange?: (health: Record<string, any> | null) => void;
   onOpenReleaseModal?: () => void;
-};
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("it-IT", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 };
 
 export default function MicroserviceGeneralTab({
@@ -81,6 +72,7 @@ export default function MicroserviceGeneralTab({
 
   const lowerName = microservice.toLowerCase();
   const isCache = lowerName === "cachemanager";
+  const isMarketData = lowerName === "market-data-service";
   const hasDbControls = true;
   const token = useMemo(() => {
     if (typeof localStorage === "undefined") return null;
@@ -336,6 +328,57 @@ export default function MicroserviceGeneralTab({
       });
   }, [microservice]);
 
+  const handleDbLoggerChange = useCallback(
+    async (next: boolean) => {
+      setDbLogger(next);
+      setDbLoggerError(null);
+      setDbLoggerStatus("loading");
+      try {
+        await apiSend("PUT", `dbLogger/${next ? "on" : "off"}`);
+        setDbLoggerStatus("idle");
+        onDbLoggerChange?.(next);
+      } catch (err: any) {
+        setDbLoggerError(err?.message || "Errore aggiornando dbLogger");
+        setDbLoggerStatus("error");
+      }
+    },
+    [apiSend, onDbLoggerChange]
+  );
+
+  const handleLogLevelChange = useCallback(
+    async (next: string) => {
+      setLogLevelError(null);
+      setLogLevelStatus("loading");
+      try {
+        await apiSend("PUT", "status/logLevel", { logLevel: next });
+        setLogLevel(next);
+        onLogLevelChange?.(next);
+        setLogLevelStatus("idle");
+      } catch (err: any) {
+        setLogLevelError(err?.message || "Errore aggiornando log level");
+        setLogLevelStatus("error");
+      }
+    },
+    [apiSend, onLogLevelChange]
+  );
+
+  const handleProviderChange = useCallback(
+    async (opt: string) => {
+      setProviderError(null);
+      setProviderStatus("loading");
+      try {
+        const data = await apiSend("PUT", `provider/${opt}`);
+        const next = (data as any)?.provider ?? opt;
+        setProvider(next);
+        setProviderStatus("idle");
+      } catch (err: any) {
+        setProviderError(err?.message || "Errore aggiornando il provider");
+        setProviderStatus("error");
+      }
+    },
+    [apiSend]
+  );
+
   const handleSaveChannels = useCallback(async () => {
     setCommunicationError(null);
     setCommunicationSuccess(null);
@@ -516,225 +559,24 @@ export default function MicroserviceGeneralTab({
   );
 
   return (
-    <div className="mt-2 grid gap-3 md:grid-cols-2">
-      <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-700">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="flex-1">
-            <table className="min-w-[200px] text-[11px] text-slate-700">
-              <tbody>
-                <tr>
-                  <td className="pr-3 font-semibold text-slate-600">Service Enabled</td>
-                  <td className="py-1">
-                    <div className="text-[11px] text-slate-500">Gestito nella pagina service flags.</div>
-                  </td>
-                </tr>
-                {hasDbControls && (
-                  <>
-                    <tr>
-                      <td className="pr-3 font-semibold text-slate-600">DB Logger</td>
-                      <td className="py-1">
-                        <label className="inline-flex cursor-pointer items-center gap-2">
-                          <input
-                            type="checkbox"
-                            className="peer sr-only"
-                            checked={!!dbLogger}
-                            disabled={dbLoggerStatus === "loading"}
-                            onChange={async () => {
-                              const next = !dbLogger;
-                              setDbLogger(next);
-                              setDbLoggerError(null);
-                              setDbLoggerStatus("loading");
-                              try {
-                                await apiSend("PUT", `dbLogger/${next ? "on" : "off"}`);
-                                setDbLoggerStatus("idle");
-                                onDbLoggerChange?.(next);
-                              } catch (err: any) {
-                                setDbLoggerError(err?.message || "Errore aggiornando dbLogger");
-                                setDbLoggerStatus("error");
-                              }
-                            }}
-                          />
-                          <span
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                              dbLogger ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
-                            } ${dbLoggerStatus === "loading" ? "opacity-70" : ""}`}
-                          >
-                            <span
-                              className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                                dbLogger ? "translate-x-4" : "translate-x-0.5"
-                              }`}
-                            />
-                          </span>
-                          <span className="text-[11px] font-semibold text-slate-700">{dbLogger ? "On" : "Off"}</span>
-                        </label>
-                        <div className="mt-1 text-[11px] text-slate-500">
-                          Abilita o disabilita la scrittura dei log in DB.
-                        </div>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="pr-3 font-semibold text-slate-600">DB Level</td>
-                      <td className="py-1">
-                        <div className="flex items-center gap-2">
-                          <select
-                            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
-                            value={logLevel ?? ""}
-                            disabled={logLevelStatus === "loading"}
-                            onChange={async (e) => {
-                              const next = e.target.value;
-                              setLogLevelError(null);
-                              setLogLevelStatus("loading");
-                              try {
-                                await apiSend("PUT", "status/logLevel", { logLevel: next });
-                                setLogLevel(next);
-                                onLogLevelChange?.(next);
-                                setLogLevelStatus("idle");
-                              } catch (err: any) {
-                                setLogLevelError(err?.message || "Errore aggiornando log level");
-                                setLogLevelStatus("error");
-                              }
-                            }}
-                          >
-                            <option value="">-</option>
-                            <option value="trace">trace</option>
-                            <option value="log">log</option>
-                            <option value="info">info</option>
-                            <option value="warning">warning</option>
-                            <option value="error">error</option>
-                          </select>
-                          {logLevelStatus === "loading" && (
-                            <span className="text-[11px] text-slate-500">Aggiornamento...</span>
-                          )}
-                        </div>
-                        <div className="mt-1 text-[11px] text-slate-500">Seleziona il livello di log del microservizio.</div>
-                      </td>
-                    </tr>
-                    {lowerName === "market-data-service" && (
-                      <tr>
-                        <td className="pr-3 font-semibold text-slate-600">IBKR Bridge</td>
-                        <td className="py-1">
-                          {ibkrStatusState === "loading" && (
-                            <div className="text-[11px] text-slate-500">Caricamento status...</div>
-                          )}
-                          {ibkrStatusError && (
-                            <div className="text-[11px] text-rose-600">{ibkrStatusError}</div>
-                          )}
-                          {!ibkrStatusError && ibkrStatusState !== "loading" && (
-                            <div className="space-y-1 text-[11px] text-slate-700">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`h-2 w-2 rounded-full ${
-                                    ibkrStatus?.wsConnected ? "bg-emerald-500" : "bg-rose-500"
-                                  }`}
-                                />
-                                <span className="font-semibold">
-                                  WS {ibkrStatus?.wsConnected ? "connesso" : "disconnesso"}
-                                </span>
-                              </div>
-                              <div>
-                                Auth:{" "}
-                                <span className="font-semibold">
-                                  {ibkrStatus?.lastAuthStatus?.authenticated ? "OK" : "NO"}
-                                </span>
-                              </div>
-                              <div>
-                                Bridge:{" "}
-                                <span
-                                  className={`font-semibold ${
-                                    ibkrStatus?.lastHmdsInitOk === false
-                                      ? "text-rose-600"
-                                      : "text-slate-700"
-                                  }`}
-                                >
-                                  {ibkrStatus?.lastHmdsInitOk === false
-                                    ? "DOWN"
-                                    : ibkrStatus?.lastHmdsError
-                                    ? ibkrStatus.lastHmdsError
-                                    : "OK"}
-                                </span>
-                              </div>
-                              {ibkrStatus?.lastHmdsInitOk === false && (
-                                <div className="text-[10px] text-rose-600">
-                                  HMDS init non riuscito
-                                </div>
-                              )}
-                              <div className="text-[10px] text-slate-500">
-                                Last tickle: {formatDateTime(ibkrStatus?.lastTickleAt)}
-                              </div>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                    <tr>
-                      <td className="pr-3 font-semibold text-slate-600">Data Provider</td>
-                      <td className="py-1">
-                        {isCache ? (
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-3">
-                              {["ALPACA", "FMP", "IBKR"].map((opt) => (
-                                <label key={opt} className="inline-flex items-center gap-2 text-xs text-slate-700">
-                                  <input
-                                    type="radio"
-                                    name="data-provider"
-                                    value={opt}
-                                    checked={provider === opt}
-                                    disabled={providerStatus === "loading"}
-                                    onChange={async () => {
-                                      setProviderError(null);
-                                      setProviderStatus("loading");
-                                      try {
-                                        const data = await apiSend("PUT", `provider/${opt}`);
-                                        const next = (data as any)?.provider ?? opt;
-                                        setProvider(next);
-                                        setProviderStatus("idle");
-                                      } catch (err: any) {
-                                        setProviderError(err?.message || "Errore aggiornando il provider");
-                                        setProviderStatus("error");
-                                      }
-                                    }}
-                                  />
-                                  <span>{opt}</span>
-                                </label>
-                              ))}
-                              {providerStatus === "loading" && (
-                                <span className="text-[11px] text-slate-500">Aggiornamento...</span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-slate-500">
-                              Seleziona il provider storico usato dal cacheManager.
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-500">-</span>
-                        )}
-                      </td>
-                    </tr>
-                  </>
-                )}
-                <tr>
-                  <td className="pr-3 font-semibold text-slate-600">Updated</td>
-                  <td className="py-1 whitespace-nowrap">{formatDateTime(release?.lastUpdate)}</td>
-                </tr>
-              </tbody>
-            </table>
-            {dbLoggerError && (
-              <div className="mt-2 text-[11px] text-amber-700">{dbLoggerError}</div>
-            )}
-            {logLevelError && (
-              <div className="mt-2 text-[11px] text-amber-700">{logLevelError}</div>
-            )}
-            {providerError && (
-              <div className="mt-2 text-[11px] text-amber-700">{providerError}</div>
-            )}
-          </div>
-          <div className="flex w-full flex-col gap-2 md:w-auto">
-            <BaseButton
-              variant="outline"
-              color="neutral"
-              size="sm"
-              startIcon={<AppIcon icon="mdi:database-settings" />}
-              onClick={() => {
+    <div className="mt-2 space-y-3">
+      {isCache || isMarketData ? (
+        /* Layout per cachemanager e market-data-service: 2 colonne - Sinistra (DbSettings + Card specifica) | Destra (CommunicationChannels) */
+        <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+          {/* Colonna 1: DbSettings + Card specifica (50% larghezza) */}
+          <div className="flex flex-col gap-3">
+            <MicroserviceDbSettingsCard
+              microservice={microservice}
+              dbLogger={dbLogger}
+              dbLoggerStatus={dbLoggerStatus}
+              dbLoggerError={dbLoggerError}
+              logLevel={logLevel}
+              logLevelStatus={logLevelStatus}
+              logLevelError={logLevelError}
+              release={release}
+              onDbLoggerChange={handleDbLoggerChange}
+              onLogLevelChange={handleLogLevelChange}
+              onOpenDbSettings={() => {
                 setShowSettingsModal(true);
                 setSettingsStatus("loading");
                 setSettingsError(null);
@@ -754,117 +596,103 @@ export default function MicroserviceGeneralTab({
                     setSettingsStatus("error");
                   });
               }}
-            >
-              DB Settings
-            </BaseButton>
-            <BaseButton
-              variant="outline"
-              color="neutral"
-              size="sm"
-              startIcon={<AppIcon icon="mdi:information-outline" />}
-              onClick={() => {
+              onOpenReleaseInfo={() => {
                 onOpenReleaseModal?.();
               }}
-              disabled={!release}
-            >
-              Release info
-            </BaseButton>
+            />
+
+            {/* Card specifica per il microservizio */}
+            {isCache && (
+              <MicroserviceDataProviderCard
+                provider={provider}
+                providerStatus={providerStatus}
+                providerError={providerError}
+                onProviderChange={handleProviderChange}
+              />
+            )}
+            {isMarketData && (
+              <MicroserviceIbkrBridgeCard
+                ibkrStatus={ibkrStatus}
+                ibkrStatusState={ibkrStatusState}
+                ibkrStatusError={ibkrStatusError}
+              />
+            )}
           </div>
-        </div>
-      </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-[11px] text-slate-700">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold text-slate-700">Communication channels</div>
-          {communicationStatus === "loading" && (
-            <span className="text-[11px] text-slate-500">Caricamento...</span>
-          )}
+          {/* Colonna 2: Communication Channels (50% larghezza, stessa altezza delle 2 card a sinistra) */}
+          <MicroserviceCommunicationChannelsCard
+            microservice={microservice}
+            channels={communicationChannels}
+            originalChannels={communicationOriginal}
+            communicationRaw={communicationRaw}
+            communicationMax={communicationMax}
+            status={communicationStatus}
+            saving={communicationSaving}
+            error={communicationError}
+            success={communicationSuccess}
+            onChannelsChange={setCommunicationChannels}
+            onToggleChannel={handleToggleChannel}
+            onSaveChannels={handleSaveChannels}
+          />
         </div>
-        {communicationError && (
-          <div className="mb-2 text-[11px] text-amber-700">{communicationError}</div>
-        )}
-        {communicationSuccess && (
-          <div className="mb-2 text-[11px] text-emerald-700">{communicationSuccess}</div>
-        )}
-        <div className="rounded-md border border-slate-100 bg-white">
-          {Object.entries(communicationChannels || {}).map(([key, ch]) => (
-            <div key={key} className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0">
-              <div className="w-32 text-[11px] font-semibold text-slate-600 capitalize">{key}</div>
-              <label className="inline-flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  checked={!!ch.on}
-                  onChange={() => handleToggleChannel(key)}
-                  disabled={communicationSaving}
-                />
-                <span
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                    ch.on ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
-                  } ${communicationSaving ? "opacity-70" : ""}`}
-                >
-                  <span
-                    className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                      ch.on ? "translate-x-4" : "translate-x-0.5"
-                    }`}
-                  />
-                </span>
-                <span className="text-[11px] font-semibold text-slate-700">{ch.on ? "On" : "Off"}</span>
-              </label>
-              <div className="flex items-center gap-1">
-                <span className="text-[11px] text-slate-500">intervalsMs</span>
-                <input
-                  type="number"
-                  min={1}
-                  className="w-24 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
-                  value={ch.intervalsMs}
-                  onChange={(e) =>
-                    setCommunicationChannels((prev) => ({
-                      ...prev,
-                      [key]: {
-                        ...(prev[key] || { on: false, params: {} }),
-                        intervalsMs: e.target.value,
-                        params: prev[key]?.params || communicationOriginal[key]?.params || {},
-                      },
-                    }))
-                  }
-                  disabled={communicationSaving}
-                />
-              </div>
-              {ch.params && Object.keys(ch.params).length > 1 && (
-                <div className="ml-auto text-[11px] text-slate-500">
-                  {Object.entries(ch.params)
-                    .filter(([k]) => k !== "intervalsMs")
-                    .map(([k, v]) => (
-                      <div key={k} className="text-[11px]">
-                        {k}: {String(v)}
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          ))}
-          {Object.keys(communicationChannels || {}).length === 0 && communicationStatus !== "loading" && (
-            <div className="px-3 py-2 text-[11px] text-slate-500">Nessun channel disponibile</div>
-          )}
-        </div>
-        <div className="mt-3 flex justify-end">
-          <BaseButton
-            variant="outline"
-            color="neutral"
-            size="sm"
-            startIcon={<AppIcon icon="mdi:content-save-outline" />}
-            disabled={communicationSaving || communicationStatus === "loading"}
-            onClick={handleSaveChannels}
-          >
-            Save channels
-          </BaseButton>
-        </div>
-      </div>
+      ) : (
+        /* Layout standard per altri microservizi: DbSettings + Communication Channels affiancati */
+        <div className="grid gap-3 md:grid-cols-2">
+          <MicroserviceDbSettingsCard
+            microservice={microservice}
+            dbLogger={dbLogger}
+            dbLoggerStatus={dbLoggerStatus}
+            dbLoggerError={dbLoggerError}
+            logLevel={logLevel}
+            logLevelStatus={logLevelStatus}
+            logLevelError={logLevelError}
+            release={release}
+            onDbLoggerChange={handleDbLoggerChange}
+            onLogLevelChange={handleLogLevelChange}
+            onOpenDbSettings={() => {
+              setShowSettingsModal(true);
+              setSettingsStatus("loading");
+              setSettingsError(null);
+              setSettingsSuccess(null);
+              fetchCacheSettings()
+                .then((data) => {
+                  setSettings(data);
+                  const obj: Record<string, string> = {};
+                  Object.entries(data || {}).forEach(([k, v]) => {
+                    obj[k] = v != null ? String(v) : "";
+                  });
+                  setEditableSettings(obj);
+                  setSettingsStatus("idle");
+                })
+                .catch((err: any) => {
+                  setSettingsError(err?.message || "Errore nel leggere i settings");
+                  setSettingsStatus("error");
+                });
+            }}
+            onOpenReleaseInfo={() => {
+              onOpenReleaseModal?.();
+            }}
+          />
 
-      <div className="md:col-span-2 mt-3">
-        <MicroserviceLogsCard microservice={microservice} limit={100} />
-      </div>
+          <MicroserviceCommunicationChannelsCard
+            microservice={microservice}
+            channels={communicationChannels}
+            originalChannels={communicationOriginal}
+            communicationRaw={communicationRaw}
+            communicationMax={communicationMax}
+            status={communicationStatus}
+            saving={communicationSaving}
+            error={communicationError}
+            success={communicationSuccess}
+            onChannelsChange={setCommunicationChannels}
+            onToggleChannel={handleToggleChannel}
+            onSaveChannels={handleSaveChannels}
+          />
+        </div>
+      )}
+
+      {/* Logs (per tutti, full width) */}
+      <MicroserviceLogsCard microservice={microservice} limit={100} />
 
       {showSettingsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
