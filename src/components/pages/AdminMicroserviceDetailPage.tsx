@@ -7,6 +7,8 @@ import MicroserviceGeneralTab from "../molecules/microservice/MicroserviceGenera
 import TickerScannerAdminPage from "./TickerScannerAdminPage";
 import ReactApexChart from "react-apexcharts";
 import { env } from "../../config/env";
+import { IBKR_MARKET_DATA_FIELDS } from "../../config/ibkrMarketDataFields";
+import { redisWsBridgeClient } from "../../services/ws/redisWsBridgeClient";
 
 type Status = "idle" | "loading" | "error";
 type L3Target =
@@ -46,6 +48,16 @@ const formatDateTime = (value?: string | null) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const splitFieldLabel = (value: string) => {
+  const text = String(value || "").trim();
+  if (!text) return { name: "-", description: "" };
+  const idx = text.indexOf(".");
+  if (idx === -1) return { name: text, description: "" };
+  const name = text.slice(0, idx + 1).trim();
+  const description = text.slice(idx + 1).trim();
+  return { name, description };
 };
 
 const formatUptime = (value?: number | string) => {
@@ -174,7 +186,18 @@ export default function AdminMicroserviceDetailPage() {
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [microserviceName, setMicroserviceName] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "general" | "specific" | "cache" | "l2" | "l2-hygiene" | "spot" | "pipe"
+    | "general"
+    | "specific"
+    | "cache"
+    | "l2"
+    | "l2-hygiene"
+    | "spot"
+    | "pipe"
+    | "live"
+    | "subscription"
+    | "websocket"
+    | "message"
+    | "email"
   >("general");
   const [candleSymbol, setCandleSymbol] = useState("");
   const [candleExchange, setCandleExchange] = useState("");
@@ -220,6 +243,57 @@ export default function AdminMicroserviceDetailPage() {
   const [l2FileTab, setL2FileTab] = useState<"json" | "table">("json");
   const [l2FileTimeFilter, setL2FileTimeFilter] = useState<string>("");
   const [l2FileTableDraft, setL2FileTableDraft] = useState<any[] | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<Status>("idle");
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [subscriptionTickers, setSubscriptionTickers] = useState<string[]>([]);
+  const [subscriptionInput, setSubscriptionInput] = useState<string>("");
+  const [subscriptionSaveStatus, setSubscriptionSaveStatus] = useState<Status>("idle");
+  const [subscriptionSaveError, setSubscriptionSaveError] = useState<string | null>(null);
+  const [subscriptionDeleteMode, setSubscriptionDeleteMode] = useState(false);
+  const [snapshotIntervalMin, setSnapshotIntervalMin] = useState<number>(1);
+  const [snapshotIntervalStatus, setSnapshotIntervalStatus] = useState<Status>("idle");
+  const [snapshotIntervalError, setSnapshotIntervalError] = useState<string | null>(null);
+  const [marketFieldsStatus, setMarketFieldsStatus] = useState<Status>("idle");
+  const [marketFieldsError, setMarketFieldsError] = useState<string | null>(null);
+  const [marketFields, setMarketFields] = useState<string[]>([]);
+  const [marketFieldsSelected, setMarketFieldsSelected] = useState<string[]>([]);
+  const [marketFieldsSearch, setMarketFieldsSearch] = useState("");
+  const [marketFieldsModal, setMarketFieldsModal] = useState(false);
+  const [marketFieldsSaveStatus, setMarketFieldsSaveStatus] = useState<Status>("idle");
+  const [marketFieldsSaveError, setMarketFieldsSaveError] = useState<string | null>(null);
+  const [liveStatus, setLiveStatus] = useState<Status>("idle");
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveActive, setLiveActive] = useState<boolean>(false);
+  const [liveTickers, setLiveTickers] = useState<string[]>([]);
+  const [liveCandles, setLiveCandles] = useState<any[]>([]);
+  const [liveMaxRows, setLiveMaxRows] = useState<number>(5);
+  const [liveSortBy, setLiveSortBy] = useState<"time" | "ticker">("time");
+  const liveUnsubRef = useRef<null | (() => void)>(null);
+  const [messageText, setMessageText] = useState("");
+  const [messageStatus, setMessageStatus] = useState<Status>("idle");
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageResult, setMessageResult] = useState<any>(null);
+  const [emailTo, setEmailTo] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [emailStatus, setEmailStatus] = useState<Status>("idle");
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailResult, setEmailResult] = useState<any>(null);
+  const [wsBridgeClients, setWsBridgeClients] = useState<any>(null);
+  const [wsBridgeMetrics, setWsBridgeMetrics] = useState<any>(null);
+  const [wsBridgeBus, setWsBridgeBus] = useState<any>(null);
+  const [wsBridgeStatus, setWsBridgeStatus] = useState<Status>("idle");
+  const [wsBridgeError, setWsBridgeError] = useState<string | null>(null);
+  const [wsBridgeChannels, setWsBridgeChannels] = useState<Record<string, boolean>>({
+    telemetry: true,
+    metrics: true,
+    data: true,
+    logs: true,
+  });
+  const [wsBridgeMessages, setWsBridgeMessages] = useState<any[]>([]);
+  const [wsBridgeSocketStatus, setWsBridgeSocketStatus] = useState<Status>("idle");
+  const [wsBridgeSocketError, setWsBridgeSocketError] = useState<string | null>(null);
+  const wsBridgeUnsubRef = useRef<null | (() => void)>(null);
   const [spotSymbol, setSpotSymbol] = useState("");
   const [spotParams, setSpotParams] = useState<Record<string, string>>({
     exchange: "",
@@ -280,6 +354,7 @@ export default function AdminMicroserviceDetailPage() {
   const [pipeLatestNote, setPipeLatestNote] = useState<string | null>(null);
   const [pipeShowErrors, setPipeShowErrors] = useState(false);
   const [pipeDetailRow, setPipeDetailRow] = useState<any>(null);
+  const [liveDetailRow, setLiveDetailRow] = useState<any>(null);
 
   const formatNumber = (value: any, digits = 4) => {
     const num = Number(value);
@@ -374,7 +449,7 @@ export default function AdminMicroserviceDetailPage() {
 
   useEffect(() => {
     const isDecisionEngineTab = slug?.toLowerCase() === "decision-engine";
-    if (!isDecisionEngineTab || activeTab !== "pipe") return;
+    if (!isDecisionEngineTab || (activeTab !== "pipe" && activeTab !== "live")) return;
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     setPipeListStatus("loading");
     setPipeListError(null);
@@ -520,7 +595,11 @@ export default function AdminMicroserviceDetailPage() {
   useEffect(() => {
     if (!slug) return;
     setMicroserviceName(slug.toLowerCase());
-    setActiveTab("general");
+    if (slug.toLowerCase() === "market-data-service") {
+      setActiveTab("subscription");
+    } else {
+      setActiveTab("general");
+    }
   }, [slug]);
 
   const filtered = useMemo(() => {
@@ -562,6 +641,9 @@ export default function AdminMicroserviceDetailPage() {
   const isScheduler = slug?.toLowerCase() === "scheduler";
   const isTickerScanner = slug?.toLowerCase() === "tickerscanner";
   const isDecisionEngine = slug?.toLowerCase() === "decision-engine";
+  const isMarketDataService = slug?.toLowerCase() === "market-data-service";
+  const isRedisWsBridge = slug?.toLowerCase() === "rediswsbridge";
+  const isAlertingService = slug?.toLowerCase() === "alertingservice";
   const releaseTitle = release?.microservice || heading;
   const healthStatus = health?.status ? `Status: ${health.status}` : "";
   const healthUptime = health?.uptime !== undefined ? `Uptime: ${formatUptime(health.uptime)}` : "";
@@ -584,6 +666,32 @@ export default function AdminMicroserviceDetailPage() {
     }));
     return [...base, ...errors];
   }, [pipeResults, pipeErrors, pipeShowErrors]);
+
+  const marketFieldEntries = useMemo(() => {
+    const term = marketFieldsSearch.trim().toLowerCase();
+    const entries = Object.entries(IBKR_MARKET_DATA_FIELDS)
+      .map(([code, label]) => ({
+        code,
+        label,
+        meta: splitFieldLabel(label),
+      }))
+      .sort((a, b) => {
+        const na = Number(a.code);
+        const nb = Number(b.code);
+        if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+        return a.code.localeCompare(b.code);
+      });
+    if (!term) return entries;
+    return entries.filter((item) => {
+      const haystack = `${item.code} ${item.meta.name} ${item.meta.description}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [marketFieldsSearch]);
+
+  const marketFieldsSelectedSet = useMemo(
+    () => new Set(marketFieldsSelected.map((val) => String(val))),
+    [marketFieldsSelected]
+  );
 
   // load provider on cachemanager tab
   useEffect(() => {
@@ -610,10 +718,498 @@ export default function AdminMicroserviceDetailPage() {
       });
   }, [isCachemanager]);
 
+  useEffect(() => {
+    if (!isMarketDataService || activeTab !== "subscription") return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setSubscriptionStatus("loading");
+    setSubscriptionError(null);
+    fetch(`${env.apiBaseUrl}/market-data-service/subscriptions`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore subscriptions");
+        const list = Array.isArray(data) ? data : Array.isArray(data?.tickers) ? data.tickers : [];
+        setSubscriptionTickers(list.filter((item: any) => typeof item === "string" && item.trim()));
+        setSubscriptionStatus("idle");
+      })
+      .catch((err) => {
+        setSubscriptionStatus("error");
+        setSubscriptionError(err?.message || "Errore nel recupero subscriptions");
+      });
+  }, [activeTab, isMarketDataService]);
+
+  useEffect(() => {
+    if (!isMarketDataService || activeTab !== "subscription") return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setMarketFieldsStatus("loading");
+    setMarketFieldsError(null);
+    fetch(`${env.apiBaseUrl}/market-data-service/fields`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore fields");
+        const list = Array.isArray(data?.fields) ? data.fields : [];
+        setMarketFields(list.map((item: any) => String(item)));
+        setMarketFieldsSelected(list.map((item: any) => String(item)));
+        setMarketFieldsStatus("idle");
+      })
+      .catch((err) => {
+        setMarketFieldsStatus("error");
+        setMarketFieldsError(err?.message || "Errore nel recupero fields");
+      });
+  }, [activeTab, isMarketDataService]);
+
+  useEffect(() => {
+    if (!isMarketDataService || activeTab !== "subscription") return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setSnapshotIntervalStatus("loading");
+    setSnapshotIntervalError(null);
+    fetch(`${env.apiBaseUrl}/market-data-service/ibkr/status`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) throw new Error(data?.error || data?.message || "Errore snapshot");
+        const ms = data?.snapshot?.intervalMs ?? null;
+        if (Number.isFinite(ms) && ms > 0) {
+          setSnapshotIntervalMin(Math.max(1, Math.round(ms / 60000)));
+        }
+        setSnapshotIntervalStatus("idle");
+      })
+      .catch((err) => {
+        setSnapshotIntervalStatus("error");
+        setSnapshotIntervalError(err?.message || "Errore nel recupero snapshot");
+      });
+  }, [activeTab, isMarketDataService]);
+
+  useEffect(() => {
+    if (!isDecisionEngine || activeTab !== "live") return;
+    if (!pipeSelectedId) return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setLiveStatus("loading");
+    setLiveError(null);
+    const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
+    fetch(
+      `${env.apiBaseUrl}/decision-engine/spot-finder/live/${encodeURIComponent(pipeSelectedId)}/status${qs}`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      }
+    )
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) {
+          throw new Error(data?.error || data?.message || "Errore live status");
+        }
+        setLiveActive(Boolean(data?.active));
+        setLiveTickers(Array.isArray(data?.tickers) ? data.tickers : []);
+        setLiveStatus("idle");
+      })
+      .catch((err) => {
+        setLiveStatus("error");
+        setLiveError(err?.message || "Errore nel recupero live status");
+      });
+  }, [activeTab, isDecisionEngine, pipeSelectedId, pipeSelectedDate]);
+
+  useEffect(() => {
+    if (!isDecisionEngine || activeTab !== "live") return;
+    if (!liveActive) {
+      if (liveUnsubRef.current) {
+        liveUnsubRef.current();
+        liveUnsubRef.current = null;
+      }
+      setLiveCandles([]);
+      return;
+    }
+
+    if (liveUnsubRef.current) return;
+
+    liveUnsubRef.current = redisWsBridgeClient.subscribe({
+      filter: (payload) => payload && typeof payload === "object" && payload?.type === "marketData",
+      onMessage: (payload) => {
+        setLiveCandles((prev) => {
+          const next = [...prev];
+          const key = String(payload?.ticker || payload?.symbol || "");
+          const mode = String(payload?.dataMode || "live");
+          const idx = key
+            ? next.findIndex((item) => {
+                const itemKey = String(item?.ticker || item?.symbol || "");
+                const itemMode = String(item?.dataMode || "live");
+                return itemKey === key && itemMode === mode;
+              })
+            : -1;
+          if (idx >= 0) {
+            next[idx] = payload;
+          } else {
+            next.push(payload);
+          }
+          return next.slice(-200);
+        });
+      },
+    });
+
+    return () => {
+      if (liveUnsubRef.current) {
+        liveUnsubRef.current();
+        liveUnsubRef.current = null;
+      }
+    };
+  }, [activeTab, isDecisionEngine, liveActive]);
+
+  useEffect(() => {
+    if (!isRedisWsBridge || activeTab !== "websocket") return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setWsBridgeStatus("loading");
+    setWsBridgeError(null);
+    const headers = {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    Promise.all([
+      fetch(`${env.apiBaseUrl}/redis-ws-bridge/status/clients`, { headers })
+        .then((res) => res.json())
+        .catch(() => null),
+      fetch(`${env.apiBaseUrl}/redis-ws-bridge/status/metrics`, { headers })
+        .then((res) => res.json())
+        .catch(() => null),
+      fetch(`${env.apiBaseUrl}/redis-ws-bridge/status/bus`, { headers })
+        .then((res) => res.json())
+        .catch(() => null),
+    ])
+      .then(([clients, metrics, bus]) => {
+        setWsBridgeClients(clients);
+        setWsBridgeMetrics(metrics);
+        setWsBridgeBus(bus);
+        setWsBridgeStatus("idle");
+      })
+      .catch((err) => {
+        setWsBridgeStatus("error");
+        setWsBridgeError(err?.message || "Errore nel recupero websocket status");
+      });
+  }, [activeTab, isRedisWsBridge]);
+
+  useEffect(() => {
+    if (!isRedisWsBridge) return;
+    if (activeTab !== "websocket" && wsBridgeUnsubRef.current) {
+      wsBridgeUnsubRef.current();
+      wsBridgeUnsubRef.current = null;
+    }
+    return () => {
+      if (wsBridgeUnsubRef.current) {
+        wsBridgeUnsubRef.current();
+        wsBridgeUnsubRef.current = null;
+      }
+    };
+  }, [activeTab, isRedisWsBridge]);
+
+  const handleOpenWsBridge = useCallback(() => {
+    setWsBridgeSocketStatus("loading");
+    setWsBridgeSocketError(null);
+    setWsBridgeMessages([]);
+    if (wsBridgeUnsubRef.current) {
+      wsBridgeUnsubRef.current();
+      wsBridgeUnsubRef.current = null;
+    }
+
+    wsBridgeUnsubRef.current = redisWsBridgeClient.subscribe({
+      filter: (payload) => {
+        const selected = Object.entries(wsBridgeChannels)
+          .filter(([, on]) => on)
+          .map(([key]) => key);
+        if (!selected.length) return false;
+        const rawChannel =
+          typeof payload?.__channel === "string"
+            ? payload.__channel
+            : typeof payload?.channel === "string"
+              ? payload.channel
+              : null;
+        const channelKey = rawChannel
+          ? String(rawChannel).split(".").slice(-1)[0]
+          : payload?.type === "marketData"
+            ? "data"
+            : payload?.type === "log"
+              ? "logs"
+              : payload?.type;
+        return channelKey ? selected.includes(String(channelKey)) : false;
+      },
+      onMessage: (payload) => {
+        setWsBridgeMessages((prev) => {
+          const next = [...prev, { ts: new Date().toISOString(), payload }];
+          return next.slice(-200);
+        });
+      },
+      onStatus: (status, detail) => {
+        if (status === "open") {
+          setWsBridgeSocketStatus("idle");
+          return;
+        }
+        if (status === "connecting") {
+          setWsBridgeSocketStatus("loading");
+          return;
+        }
+        if (status === "error" || status === "closed") {
+          setWsBridgeSocketStatus("error");
+          setWsBridgeSocketError(detail || "Errore connessione websocket");
+        }
+      },
+    });
+  }, [wsBridgeChannels]);
+
+  const handleCloseWsBridge = useCallback(() => {
+    if (wsBridgeUnsubRef.current) {
+      wsBridgeUnsubRef.current();
+      wsBridgeUnsubRef.current = null;
+    }
+    setWsBridgeSocketStatus("idle");
+  }, []);
+
+  const handleSubscriptionSave = useCallback(async () => {
+    const raw = subscriptionInput
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const normalized = Array.from(new Set(raw.map((item) => item.toUpperCase())));
+    if (normalized.length === 0) {
+      setSubscriptionSaveError("Inserisci almeno un ticker valido.");
+      return;
+    }
+    const merged = Array.from(
+      new Set([...subscriptionTickers.map((t) => String(t).toUpperCase()), ...normalized])
+    );
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setSubscriptionSaveStatus("loading");
+    setSubscriptionSaveError(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/market-data-service/subscriptions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ tickers: merged }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore salvataggio subscriptions");
+      }
+      const next = Array.isArray(data?.subscribed)
+        ? data.subscribed
+        : Array.isArray(data?.tickers)
+          ? data.tickers
+          : merged;
+      setSubscriptionTickers(next);
+      setSubscriptionInput("");
+      setSubscriptionSaveStatus("idle");
+    } catch (err: any) {
+      setSubscriptionSaveStatus("error");
+      setSubscriptionSaveError(err?.message || "Errore salvataggio subscriptions");
+    } finally {
+      setSubscriptionSaveStatus("idle");
+    }
+  }, [subscriptionInput, subscriptionTickers]);
+
+  const handleSubscriptionDelete = useCallback(
+    async (ticker: string) => {
+      if (!ticker) return;
+      const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+      setSubscriptionSaveStatus("loading");
+      setSubscriptionSaveError(null);
+      try {
+        const res = await fetch(
+          `${env.apiBaseUrl}/market-data-service/subscriptions/${encodeURIComponent(ticker)}`,
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok === false) {
+          throw new Error(data?.error || data?.message || "Errore cancellazione subscriptions");
+        }
+        const next = Array.isArray(data?.subscribed)
+          ? data.subscribed
+          : subscriptionTickers.filter((t) => t !== ticker);
+        setSubscriptionTickers(next);
+      } catch (err: any) {
+        setSubscriptionSaveError(err?.message || "Errore cancellazione subscriptions");
+      } finally {
+        setSubscriptionSaveStatus("idle");
+      }
+    },
+    [subscriptionTickers]
+  );
+
+  const handleMarketFieldsSave = useCallback(async () => {
+    if (!marketFieldsSelected.length) {
+      setMarketFieldsSaveError("Seleziona almeno un campo.");
+      return;
+    }
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setMarketFieldsSaveStatus("loading");
+    setMarketFieldsSaveError(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/market-data-service/fields`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ fields: marketFieldsSelected }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore salvataggio fields");
+      }
+      const next = Array.isArray(data?.fields) ? data.fields : marketFieldsSelected;
+      setMarketFields(next);
+      setMarketFieldsSelected(next);
+      setMarketFieldsModal(false);
+    } catch (err: any) {
+      setMarketFieldsSaveError(err?.message || "Errore salvataggio fields");
+    } finally {
+      setMarketFieldsSaveStatus("idle");
+    }
+  }, [marketFieldsSelected]);
+
+  const handleSnapshotIntervalSave = useCallback(async () => {
+    const next = Math.max(1, Number(snapshotIntervalMin || 1));
+    const intervalMs = Math.round(next * 60000);
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setSnapshotIntervalStatus("loading");
+    setSnapshotIntervalError(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/market-data-service/snapshot/interval`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ intervalMs }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore aggiornando snapshot");
+      }
+      setSnapshotIntervalStatus("idle");
+    } catch (err: any) {
+      setSnapshotIntervalStatus("error");
+      setSnapshotIntervalError(err?.message || "Errore aggiornando snapshot");
+    }
+  }, [snapshotIntervalMin]);
+
+  const handleSubscriptionResubscribe = useCallback(async () => {
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setSubscriptionSaveStatus("loading");
+    setSubscriptionSaveError(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/market-data-service/subscriptions/resubscribe`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore resubscribe");
+      }
+      setSubscriptionSaveStatus("idle");
+    } catch (err: any) {
+      setSubscriptionSaveStatus("error");
+      setSubscriptionSaveError(err?.message || "Errore resubscribe");
+    } finally {
+      setSubscriptionSaveStatus("idle");
+    }
+  }, []);
+
   // reset tab to general when microservice changes
   useEffect(() => {
-    setActiveTab("general");
+    if (microserviceName === "market-data-service") {
+      setActiveTab("subscription");
+    } else if (microserviceName === "alertingservice") {
+      setActiveTab("general");
+    } else if (microserviceName) {
+      setActiveTab("general");
+    }
   }, [microserviceName]);
+
+  const handleSendTestMessage = useCallback(async () => {
+    if (!isAlertingService) return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setMessageStatus("loading");
+    setMessageError(null);
+    setMessageResult(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/alertingservice/whatsapp/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ body: messageText.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore invio messaggio");
+      }
+      setMessageResult(data);
+      setMessageStatus("idle");
+    } catch (err: any) {
+      setMessageStatus("error");
+      setMessageError(err?.message || "Errore invio messaggio");
+    }
+  }, [env.apiBaseUrl, isAlertingService, messageText]);
+
+  const handleSendTestEmail = useCallback(async () => {
+    if (!isAlertingService) return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    setEmailStatus("loading");
+    setEmailError(null);
+    setEmailResult(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/alertingservice/email/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          to: emailTo.trim(),
+          subject: emailSubject.trim(),
+          body: emailBody.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore invio email");
+      }
+      setEmailResult(data);
+      setEmailStatus("idle");
+    } catch (err: any) {
+      setEmailStatus("error");
+      setEmailError(err?.message || "Errore invio email");
+    }
+  }, [env.apiBaseUrl, isAlertingService, emailTo, emailSubject, emailBody]);
 
   // load L3 size on landing (cachemanager only)
   useEffect(() => {
@@ -792,7 +1388,14 @@ export default function AdminMicroserviceDetailPage() {
         </div>
       )}
 
-      {filtered.length > 0 && (isCachemanager || isScheduler || isTickerScanner || isDecisionEngine) && (
+      {slug &&
+        (isCachemanager ||
+          isScheduler ||
+          isTickerScanner ||
+          isDecisionEngine ||
+          isMarketDataService ||
+          isRedisWsBridge ||
+          isAlertingService) && (
         <div className="flex items-center gap-2 border-b border-slate-200">
           <button
             className={`px-3 py-2 text-[11px] font-semibold ${
@@ -872,10 +1475,60 @@ export default function AdminMicroserviceDetailPage() {
               Pipe Execution
             </button>
           )}
+          {isDecisionEngine && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "live" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("live")}
+            >
+              Live Daily update
+            </button>
+          )}
+          {isMarketDataService && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "subscription" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("subscription")}
+            >
+              Subscription
+            </button>
+          )}
+          {isRedisWsBridge && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "websocket" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("websocket")}
+            >
+              Websocket
+            </button>
+          )}
+          {isAlertingService && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "message" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("message")}
+            >
+              Whatsapp test
+            </button>
+          )}
+          {isAlertingService && (
+            <button
+              className={`px-3 py-2 text-[11px] font-semibold ${
+                activeTab === "email" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+              }`}
+              onClick={() => setActiveTab("email")}
+            >
+              Email test
+            </button>
+          )}
         </div>
       )}
 
-      {filtered.length > 0 && activeTab === "general" && (
+      {slug && activeTab === "general" && (
         <>
           {isDecisionEngine && (
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -934,6 +1587,641 @@ export default function AdminMicroserviceDetailPage() {
             onOpenReleaseModal={() => setShowReleaseModal(true)}
           />
         </>
+      )}
+
+      {slug && activeTab === "message" && isAlertingService && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-sm font-semibold text-slate-900">Message test</div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            Invia un messaggio WhatsApp di test tramite alertingservice.
+          </div>
+          <div className="mt-3">
+            <label className="text-[11px] font-semibold text-slate-700">
+              Messaggio
+              <textarea
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700"
+                rows={4}
+                value={messageText}
+                onChange={(event) => setMessageText(event.target.value)}
+                placeholder="Scrivi il messaggio..."
+              />
+            </label>
+          </div>
+          {messageError && (
+            <div className="mt-2 text-[11px] text-rose-600">{messageError}</div>
+          )}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              onClick={handleSendTestMessage}
+              disabled={!messageText.trim() || messageStatus === "loading"}
+            >
+              {messageStatus === "loading" ? "Invio..." : "Send"}
+            </button>
+            {messageStatus === "idle" && messageText.trim() && (
+              <span className="text-[11px] text-emerald-600">Pronto</span>
+            )}
+          </div>
+          {messageResult && (
+            <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-[11px] text-emerald-700">
+              <div className="text-[11px] font-semibold text-emerald-800">
+                Risposta
+              </div>
+              <div className="mt-1 space-y-1">
+                {Object.entries(messageResult).map(([key, value]) => (
+                  <div key={key} className="flex items-start gap-2">
+                    <span className="w-28 shrink-0 font-semibold text-emerald-800">
+                      {key}
+                    </span>
+                    <span className="break-all text-emerald-700">
+                      {typeof value === "string" || typeof value === "number"
+                        ? String(value)
+                        : JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {slug && activeTab === "subscription" && isMarketDataService && (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Sottoscrizioni attive</div>
+              <div className="text-[11px] text-slate-500">
+                Elenco ticker recuperati da /market-data-service/subscriptions.
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500">
+                Se vuoi vedere i messaggi in arrivo, apri{" "}
+                <a
+                  className="font-semibold text-slate-700 underline-offset-2 hover:underline"
+                  href="#/admin/microservice/redisWsBridge"
+                >
+                  admin/microservice/redisWsBridge
+                </a>{" "}
+                e vai sul tab Websocket.
+              </div>
+            </div>
+            <div className="text-[11px] font-semibold text-slate-500">
+              {subscriptionStatus === "loading" ? "Caricamento..." : `${subscriptionTickers.length} ticker`}
+            </div>
+          </div>
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-[11px] font-semibold text-slate-700">Aggiungi ticker</div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Inserisci i simboli separati da virgola. Verranno aggiunti alle sottoscrizioni esistenti.
+            </div>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-blue-400 focus:outline-none"
+                placeholder="AAPL, NVDA, MSFT"
+                value={subscriptionInput}
+                onChange={(event) => setSubscriptionInput(event.target.value)}
+              />
+              <div className="grid w-full grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                  onClick={handleSubscriptionSave}
+                  disabled={subscriptionSaveStatus === "loading"}
+                >
+                  {subscriptionSaveStatus === "loading" ? "Salvo..." : "Subscribe"}
+                </button>
+                <button
+                  type="button"
+                  className={`inline-flex items-center justify-center rounded-md border px-4 py-2 text-[11px] font-semibold ${
+                    subscriptionDeleteMode
+                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                  onClick={() => setSubscriptionDeleteMode((prev) => !prev)}
+                >
+                  Unsubscribe
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    setMarketFieldsModal(true);
+                    setMarketFieldsSearch("");
+                    setMarketFieldsSaveError(null);
+                  }}
+                >
+                  Richiedi Campi
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={handleSubscriptionResubscribe}
+                  disabled={subscriptionSaveStatus === "loading"}
+                >
+                  Resubscribe
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+              <label className="flex items-center gap-2">
+                <span className="font-semibold">Snapshot (min)</span>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none"
+                  value={snapshotIntervalMin}
+                  onChange={(event) => {
+                    const next = parseInt(event.target.value, 10);
+                    setSnapshotIntervalMin(Number.isFinite(next) && next > 0 ? next : 1);
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                onClick={handleSnapshotIntervalSave}
+                disabled={snapshotIntervalStatus === "loading"}
+              >
+                {snapshotIntervalStatus === "loading" ? "Aggiorno..." : "Aggiorna"}
+              </button>
+              {snapshotIntervalError && (
+                <span className="text-[11px] text-rose-600">{snapshotIntervalError}</span>
+              )}
+            </div>
+            {subscriptionSaveError && (
+              <div className="mt-2 text-[11px] text-rose-600">{subscriptionSaveError}</div>
+            )}
+          </div>
+          {subscriptionError && (
+            <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+              {subscriptionError}
+            </div>
+          )}
+          {!subscriptionError && subscriptionStatus !== "loading" && subscriptionTickers.length === 0 && (
+            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+              Nessun ticker sottoscritto.
+            </div>
+          )}
+          {subscriptionTickers.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {subscriptionTickers.map((ticker) => (
+                <div
+                  key={ticker}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700"
+                >
+                  <span>{ticker}</span>
+                  {subscriptionDeleteMode && (
+                    <button
+                      type="button"
+                      className="text-rose-600 hover:text-rose-700"
+                      onClick={() => handleSubscriptionDelete(ticker)}
+                      aria-label={`Unsubscribe ${ticker}`}
+                    >
+                      <AppIcon icon="mdi:trash-can-outline" className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {slug && activeTab === "websocket" && isRedisWsBridge && (
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:col-span-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Websocket status</div>
+                <div className="text-[11px] text-slate-500">
+                  Stato del bridge redis-ws-bridge (clients, metrics, bus).
+                </div>
+              </div>
+              <div className="text-[11px] font-semibold text-slate-500">
+                {wsBridgeStatus === "loading" ? "Caricamento..." : "OK"}
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-[11px] text-slate-700">
+              {(["telemetry", "metrics", "data", "logs"] as const).map((key) => (
+                <label key={key} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 rounded border-slate-300"
+                    checked={!!wsBridgeChannels[key]}
+                    onChange={(event) =>
+                      setWsBridgeChannels((prev) => ({ ...prev, [key]: event.target.checked }))
+                    }
+                  />
+                  <span className="font-semibold">{key}</span>
+                </label>
+              ))}
+              <button
+                type="button"
+                className="ml-auto inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                onClick={handleOpenWsBridge}
+                disabled={wsBridgeSocketStatus === "loading"}
+              >
+                {wsBridgeSocketStatus === "loading" ? "Apro..." : "Open Socket"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={handleCloseWsBridge}
+              >
+                Close Socket
+              </button>
+            </div>
+            {wsBridgeError && (
+              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+                {wsBridgeError}
+              </div>
+            )}
+            {wsBridgeSocketError && (
+              <div className="mt-2 text-[11px] text-rose-600">{wsBridgeSocketError}</div>
+            )}
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:col-span-3">
+            <div className="text-[11px] font-semibold text-slate-700">Messaggi socket</div>
+            <div className="mt-2 max-h-64 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2 text-[10px] text-slate-600">
+              {wsBridgeMessages.length === 0
+                ? "Nessun messaggio ricevuto."
+                : wsBridgeMessages.map((item, idx) => (
+                    <div key={`${item.ts}-${idx}`} className="border-b border-slate-200 py-1 last:border-b-0">
+                      <div className="text-[9px] text-slate-400">{item.ts}</div>
+                      <pre className="whitespace-pre-wrap break-words">
+                        {JSON.stringify(item.payload, null, 2)}
+                      </pre>
+                    </div>
+                  ))}
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-[11px] font-semibold text-slate-700">Clients</div>
+            <pre className="mt-2 max-h-56 overflow-y-auto text-[10px] text-slate-600">
+              {JSON.stringify(wsBridgeClients ?? {}, null, 2)}
+            </pre>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-[11px] font-semibold text-slate-700">Metrics</div>
+            <pre className="mt-2 max-h-56 overflow-y-auto text-[10px] text-slate-600">
+              {JSON.stringify(wsBridgeMetrics ?? {}, null, 2)}
+            </pre>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-[11px] font-semibold text-slate-700">Bus</div>
+            <pre className="mt-2 max-h-56 overflow-y-auto text-[10px] text-slate-600">
+              {JSON.stringify(wsBridgeBus ?? {}, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {slug && activeTab === "email" && isAlertingService && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-sm font-semibold text-slate-900">Email test</div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            Invia una email di test tramite alertingservice.
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="text-[11px] font-semibold text-slate-700">
+              To
+              <input
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700"
+                value={emailTo}
+                onChange={(event) => setEmailTo(event.target.value)}
+                placeholder="email@example.com"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700">
+              Subject
+              <input
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700"
+                value={emailSubject}
+                onChange={(event) => setEmailSubject(event.target.value)}
+                placeholder="Oggetto"
+              />
+            </label>
+          </div>
+          <div className="mt-3">
+            <label className="text-[11px] font-semibold text-slate-700">
+              Test
+              <textarea
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700"
+                rows={4}
+                value={emailBody}
+                onChange={(event) => setEmailBody(event.target.value)}
+                placeholder="Scrivi il testo..."
+              />
+            </label>
+          </div>
+          {emailError && (
+            <div className="mt-2 text-[11px] text-rose-600">{emailError}</div>
+          )}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              onClick={handleSendTestEmail}
+              disabled={
+                !emailTo.trim() ||
+                !emailSubject.trim() ||
+                !emailBody.trim() ||
+                emailStatus === "loading"
+              }
+            >
+              {emailStatus === "loading" ? "Invio..." : "Send"}
+            </button>
+          </div>
+          {emailResult && (
+            <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-[11px] text-emerald-700">
+              <div className="text-[11px] font-semibold text-emerald-800">
+                Risposta
+              </div>
+              <div className="mt-1 space-y-1">
+                {Object.entries(emailResult).map(([key, value]) => (
+                  <div key={key} className="flex items-start gap-2">
+                    <span className="w-28 shrink-0 font-semibold text-emerald-800">
+                      {key}
+                    </span>
+                    <span className="break-all text-emerald-700">
+                      {typeof value === "string" || typeof value === "number"
+                        ? String(value)
+                        : JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {slug && activeTab === "live" && isDecisionEngine && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Live Daily update</div>
+              <div className="text-[11px] text-slate-500">
+                Avvia il calcolo live sui ticker con trend attivo per la data selezionata.
+              </div>
+            </div>
+            <div className="text-[11px] font-semibold text-slate-500">
+              {liveStatus === "loading" ? "Caricamento..." : liveActive ? "Attivo" : "Disattivo"}
+            </div>
+          </div>
+
+          {!pipeSelectedId && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+              Seleziona una pipe per gestire il live.
+            </div>
+          )}
+
+          {pipeSelectedId && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="text-[11px] font-semibold text-slate-700">
+                Date
+                <input
+                  type="date"
+                  className="mt-1 block rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  value={pipeSelectedDate || ""}
+                  onChange={(event) => setPipeSelectedDate(event.target.value)}
+                />
+              </label>
+              {!liveActive && (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                  onClick={async () => {
+                    const token =
+                      typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                    setLiveStatus("loading");
+                    setLiveError(null);
+                    const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
+                    try {
+                      const res = await fetch(
+                        `${env.apiBaseUrl}/decision-engine/spot-finder/live/${encodeURIComponent(
+                          pipeSelectedId
+                        )}${qs}`,
+                        {
+                          method: "GET",
+                          headers: {
+                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                          },
+                        }
+                      );
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok || data?.ok === false) {
+                        throw new Error(data?.error || data?.message || "Errore avvio live");
+                      }
+                      setLiveActive(true);
+                      setLiveTickers(Array.isArray(data?.subscribed) ? data.subscribed : []);
+                      setLiveStatus("idle");
+                    } catch (err: any) {
+                      setLiveStatus("error");
+                      setLiveError(err?.message || "Errore avvio live");
+                    }
+                  }}
+                >
+                  Start live
+                </button>
+              )}
+              {liveActive && (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                  onClick={async () => {
+                    const token =
+                      typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                    setLiveStatus("loading");
+                    setLiveError(null);
+                    const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
+                    try {
+                      const res = await fetch(
+                        `${env.apiBaseUrl}/decision-engine/spot-finder/live/${encodeURIComponent(
+                          pipeSelectedId
+                        )}${qs}`,
+                        {
+                          method: "DELETE",
+                          headers: {
+                            "Content-Type": "application/json",
+                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                          },
+                        }
+                      );
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok || data?.ok === false) {
+                        throw new Error(data?.error || data?.message || "Errore stop live");
+                      }
+                      setLiveActive(false);
+                      setLiveTickers([]);
+                      setLiveStatus("idle");
+                    } catch (err: any) {
+                      setLiveStatus("error");
+                      setLiveError(err?.message || "Errore stop live");
+                    }
+                  }}
+                >
+                  Stop live
+                </button>
+              )}
+            </div>
+          )}
+
+          {liveError && (
+            <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+              {liveError}
+            </div>
+          )}
+
+          {liveTickers.length > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] font-semibold text-slate-700">
+                Sottoscrizione attiva per:
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {liveTickers.map((ticker) => (
+                  <span
+                    key={ticker}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700"
+                  >
+                    {ticker}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {liveActive && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[11px] font-semibold text-slate-700">
+                  Ultime candele (live)
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+                  <label className="flex items-center gap-2">
+                    <span className="font-semibold">Max righe</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={200}
+                      className="w-16 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none"
+                      value={liveMaxRows}
+                      onChange={(event) => {
+                        const next = parseInt(event.target.value, 10);
+                        setLiveMaxRows(Number.isFinite(next) && next > 0 ? next : 1);
+                      }}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <span className="font-semibold">Ordina</span>
+                    <select
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none"
+                      value={liveSortBy}
+                      onChange={(event) => setLiveSortBy(event.target.value as "time" | "ticker")}
+                    >
+                      <option value="time">Time</option>
+                      <option value="ticker">Ticker</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div className="mt-2 overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-[10px] text-slate-700">
+                  <thead className="bg-slate-50 text-left uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-2 py-1 font-semibold">Time</th>
+                      <th className="px-2 py-1 font-semibold">Ticker</th>
+                      <th className="px-2 py-1 font-semibold">Type</th>
+                      <th className="px-2 py-1 font-semibold">Price</th>
+                      <th className="px-2 py-1 font-semibold">Volume</th>
+                      <th className="px-2 py-1 font-semibold">Source</th>
+                      <th className="px-2 py-1 font-semibold">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {liveCandles.length === 0 && (
+                      <tr>
+                        <td className="px-2 py-2 text-slate-500" colSpan={7}>
+                          Nessuna candela ricevuta.
+                        </td>
+                      </tr>
+                    )}
+                    {liveCandles
+                      .slice()
+                      .sort((a, b) => {
+                        if (liveSortBy === "ticker") {
+                          const at = String(a?.ticker || a?.symbol || "");
+                          const bt = String(b?.ticker || b?.symbol || "");
+                          return at.localeCompare(bt);
+                        }
+                        const at = Number(a?.ts || 0);
+                        const bt = Number(b?.ts || 0);
+                        return bt - at;
+                      })
+                      .slice(0, Math.max(1, liveMaxRows))
+                      .map((row, idx) => {
+                      const payload = row?.payload || {};
+                      const lastPrice = payload?.["31"];
+                      const bidPrice = payload?.["84"];
+                      const askPrice = payload?.["86"];
+                      const lastSize = payload?.["88"];
+                      const bidSize = payload?.["85"];
+                      const askSize = payload?.["87"];
+                      const volume = payload?.["87"] ?? payload?.["72"];
+                      let type = "-";
+                      let price = "-";
+                      let size = "-";
+                      if (lastPrice != null) {
+                        type = "last";
+                        price = lastPrice;
+                        size = lastSize ?? "-";
+                      } else if (bidPrice != null) {
+                        type = "bid";
+                        price = bidPrice;
+                        size = bidSize ?? "-";
+                      } else if (askPrice != null) {
+                        type = "ask";
+                        price = askPrice;
+                        size = askSize ?? "-";
+                      }
+
+                      const isSnapshot = row?.dataMode === "snapshot";
+                      return (
+                        <tr
+                          key={`${row?.ts || "row"}-${idx}`}
+                          className={isSnapshot ? "bg-amber-50" : ""}
+                        >
+                          <td className="px-2 py-1 text-slate-600">
+                            {row?.ts ? new Date(row.ts).toLocaleTimeString("it-IT") : "-"}
+                          </td>
+                          <td className="px-2 py-1 font-semibold text-slate-800">
+                            {row?.ticker || row?.symbol || "-"}
+                          </td>
+                          <td className="px-2 py-1">{type}</td>
+                          <td className="px-2 py-1">{price}</td>
+                          <td className="px-2 py-1">{volume ?? size}</td>
+                          <td className="px-2 py-1">
+                            {row?.dataMode ? String(row.dataMode) : "-"}
+                          </td>
+                          <td className="px-2 py-1">
+                            <button
+                              type="button"
+                              className="text-slate-500 hover:text-slate-700"
+                              onClick={() => setLiveDetailRow(row)}
+                              aria-label="Dettaglio payload"
+                            >
+                              <AppIcon icon="mdi:eye-outline" className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {filtered.length > 0 && activeTab === "specific" && isCachemanager && (
@@ -2879,6 +4167,7 @@ export default function AdminMicroserviceDetailPage() {
                   <th className="px-3 py-2 font-semibold">Breakout OK</th>
                   <th className="px-3 py-2 font-semibold">Pullback OK</th>
                   <th className="px-3 py-2 font-semibold">ATR Fit</th>
+                  <th className="px-3 py-2 font-semibold">Last touch</th>
                   <th className="px-3 py-2 font-semibold">Details</th>
                 </tr>
               </thead>
@@ -2894,7 +4183,18 @@ export default function AdminMicroserviceDetailPage() {
                   return (
                     <tr key={`${row.ticker}-${idx}`} className="hover:bg-slate-50">
                       <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
-                      <td className="px-3 py-2 font-semibold text-slate-900">{row.ticker}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">
+                        {row.ticker ? (
+                          <a
+                            className="text-slate-900 underline-offset-2 hover:underline"
+                            href={`#/dashboard/tickers/${encodeURIComponent(String(row.ticker))}`}
+                          >
+                            {row.ticker}
+                          </a>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-slate-700">{row.exchange || "-"}</td>
                       <td className="px-3 py-2 text-slate-700">{formatNumber(row.currentPrice, 4)}</td>
                       <td className="px-3 py-2 text-slate-700">
@@ -2990,6 +4290,9 @@ export default function AdminMicroserviceDetailPage() {
                             title={atrFit ? "Supporto entro ATR" : "Nessun supporto entro ATR"}
                           />
                         )}
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {row?.lastTouchAt ? formatDateTime(row.lastTouchAt) : "-"}
                       </td>
                       <td className="px-3 py-2 text-slate-700">
                         <button
@@ -3809,6 +5112,180 @@ export default function AdminMicroserviceDetailPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {marketFieldsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex w-full max-w-4xl flex-col rounded-xl bg-white p-5 shadow-xl max-h-[85vh]">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <div className="text-base font-semibold text-slate-900">Richiedi campi</div>
+                <div className="text-[11px] text-slate-500">
+                  Seleziona i campi da richiedere per tutte le sottoscrizioni.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => setMarketFieldsModal(false)}
+              >
+                Chiudi
+              </button>
+            </div>
+
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <input
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none md:w-80"
+                placeholder="Cerca per codice, nome o descrizione"
+                value={marketFieldsSearch}
+                onChange={(event) => setMarketFieldsSearch(event.target.value)}
+              />
+              <div className="text-[11px] text-slate-500">
+                Selezionati: {marketFieldsSelected.length}
+              </div>
+            </div>
+
+            {marketFieldsError && (
+              <div className="mb-2 text-[11px] text-rose-600">{marketFieldsError}</div>
+            )}
+
+            <div className="flex-1 overflow-y-auto rounded-md border border-slate-200 bg-slate-50">
+              <table className="min-w-full text-left text-[11px] text-slate-700">
+                <thead className="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Select</th>
+                    <th className="px-3 py-2 font-semibold">Code</th>
+                    <th className="px-3 py-2 font-semibold">Name</th>
+                    <th className="px-3 py-2 font-semibold">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {marketFieldEntries.map((field) => {
+                    const checked = marketFieldsSelectedSet.has(field.code);
+                    return (
+                      <tr key={field.code} className="hover:bg-white">
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            className="h-3 w-3 rounded border-slate-300"
+                            checked={checked}
+                            onChange={(event) => {
+                              const next = new Set(marketFieldsSelectedSet);
+                              if (event.target.checked) {
+                                next.add(field.code);
+                              } else {
+                                next.delete(field.code);
+                              }
+                              setMarketFieldsSelected(Array.from(next));
+                            }}
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-semibold text-slate-800">{field.code}</td>
+                        <td className="px-3 py-2">{field.meta.name}</td>
+                        <td className="px-3 py-2 text-slate-500">{field.meta.description || "-"}</td>
+                      </tr>
+                    );
+                  })}
+                  {marketFieldEntries.length === 0 && (
+                    <tr>
+                      <td className="px-3 py-3 text-slate-500" colSpan={4}>
+                        Nessun campo trovato.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {marketFieldsSaveError && (
+              <div className="mt-2 text-[11px] text-rose-600">{marketFieldsSaveError}</div>
+            )}
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => setMarketFieldsModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                onClick={handleMarketFieldsSave}
+                disabled={marketFieldsSaveStatus === "loading"}
+              >
+                {marketFieldsSaveStatus === "loading" ? "Richiedo..." : "Richiedi"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {liveDetailRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex w-full max-w-2xl flex-col rounded-xl bg-white p-5 shadow-xl max-h-[80vh]">
+            {(() => {
+              const payload = liveDetailRow?.payload || {};
+              const ticker = liveDetailRow?.ticker || liveDetailRow?.symbol || "-";
+              const mappedPayload = Object.fromEntries(
+                Object.entries(payload || {}).map(([key, value]) => {
+                  const label = IBKR_MARKET_DATA_FIELDS[key];
+                  if (!label) return [key, value];
+                  const { name } = splitFieldLabel(label);
+                  const fieldName = name.replace(/\.$/, "");
+                  return [fieldName || key, value];
+                })
+              );
+              return (
+                <>
+                  <div className="mb-2 flex items-center justify-between">
+                    <div>
+                      <div className="text-base font-semibold text-slate-900">{ticker}</div>
+                      <div className="text-[11px] text-slate-500">Dettaglio messaggio websocket</div>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      onClick={() => setLiveDetailRow(null)}
+                    >
+                      Chiudi
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto pr-1">
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
+                      <div className="text-xs font-semibold text-slate-800">Message</div>
+                      <div className="mt-2 grid gap-2 text-[11px] text-slate-700">
+                        <div>
+                          <span className="font-semibold">Type:</span> {liveDetailRow?.type || "-"}
+                        </div>
+                        <div>
+                          <span className="font-semibold">Conid:</span> {liveDetailRow?.conid || "-"}
+                        </div>
+                        <div>
+                          <span className="font-semibold">Channel:</span> {liveDetailRow?.__channel || "-"}
+                        </div>
+                        <div>
+                          <span className="font-semibold">Source:</span> {liveDetailRow?.__source || "-"}
+                        </div>
+                        <div>
+                          <span className="font-semibold">Timestamp:</span>{" "}
+                          {liveDetailRow?.ts ? new Date(liveDetailRow.ts).toLocaleString("it-IT") : "-"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
+                      <div className="text-xs font-semibold text-slate-800">Payload</div>
+                      <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-[10px] text-slate-600">
+                        {JSON.stringify(mappedPayload, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
