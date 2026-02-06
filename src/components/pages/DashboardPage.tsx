@@ -11,6 +11,7 @@ import UserSettingsPage from "./UserSettingsPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { env } from "../../config/env";
+import { redisWsBridgeClient } from "../../services/ws/redisWsBridgeClient";
 
 const getAuthToken = () =>
   typeof localStorage === "undefined" ? null : localStorage.getItem("astraai:auth:token");
@@ -65,6 +66,8 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
   const [accountDetails, setAccountDetails] = useState<Record<string, any> | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [wsHealth, setWsHealth] = useState(() => redisWsBridgeClient.getHealth());
+  const [wsLogs, setWsLogs] = useState(() => redisWsBridgeClient.getLogs());
 
   useEffect(() => {
     const syncSection = () => setSection(getAppSection());
@@ -187,6 +190,17 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     if (!selectedAccountId || section !== "overview") return;
     fetchAccountDetails(selectedAccountId);
   }, [selectedAccountId, section]);
+
+  useEffect(() => {
+    redisWsBridgeClient.start();
+    const unsub = redisWsBridgeClient.onStatus(() => {
+      setWsHealth(redisWsBridgeClient.getHealth());
+      setWsLogs(redisWsBridgeClient.getLogs());
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
 
   if (section === "tickers") {
     return (
@@ -344,6 +358,75 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
           ) : (
             <div className="text-sm text-slate-500">Nessun account disponibile.</div>
           )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Websocket logs</div>
+              <div className="text-xs text-slate-500">redis-ws-bridge status e attività</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`inline-flex h-2.5 w-2.5 rounded-full ${
+                  wsHealth.status === "open"
+                    ? "bg-emerald-500"
+                    : wsHealth.status === "connecting"
+                      ? "bg-amber-400"
+                      : "bg-rose-500"
+                }`}
+              />
+              <span className="text-[11px] font-semibold text-slate-700">
+                {wsHealth.status.toUpperCase()}
+              </span>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+              <div className="flex flex-wrap gap-3">
+                <span>
+                  Last connected: <span className="font-semibold">{wsHealth.lastConnectedAt || "-"}</span>
+                </span>
+                <span>
+                  Last message: <span className="font-semibold">{wsHealth.lastMessageAt || "-"}</span>
+                </span>
+                <span>
+                  Last close: <span className="font-semibold">{wsHealth.lastCloseAt || "-"}</span>
+                </span>
+                <span>
+                  Subscriptions: <span className="font-semibold">{wsHealth.subscriptions}</span>
+                </span>
+              </div>
+              {wsHealth.lastError && (
+                <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
+                  {wsHealth.lastError}
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600">
+              <div className="text-[11px] font-semibold text-slate-700">Log connessione</div>
+              <div className="mt-2 max-h-40 overflow-y-auto">
+                {wsLogs.length === 0 && <div>Nessun evento websocket</div>}
+                {wsLogs.map((log, idx) => (
+                  <div key={`${log.ts}-${idx}`} className="flex items-start gap-2 py-0.5">
+                    <span
+                      className={`mt-0.5 inline-flex h-2 w-2 rounded-full ${
+                        log.level === "error"
+                          ? "bg-rose-500"
+                          : log.level === "warning"
+                            ? "bg-amber-400"
+                            : "bg-emerald-500"
+                      }`}
+                    />
+                    <div>
+                      <div className="text-[10px] text-slate-400">{log.ts}</div>
+                      <div>{log.message}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

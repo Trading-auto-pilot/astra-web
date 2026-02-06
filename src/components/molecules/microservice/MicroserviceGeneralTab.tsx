@@ -75,6 +75,9 @@ export default function MicroserviceGeneralTab({
   const [communicationError, setCommunicationError] = useState<string | null>(null);
   const [communicationSuccess, setCommunicationSuccess] = useState<string | null>(null);
   const [communicationSaving, setCommunicationSaving] = useState(false);
+  const [ibkrStatus, setIbkrStatus] = useState<Record<string, any> | null>(null);
+  const [ibkrStatusState, setIbkrStatusState] = useState<Status>("idle");
+  const [ibkrStatusError, setIbkrStatusError] = useState<string | null>(null);
 
   const lowerName = microservice.toLowerCase();
   const isCache = lowerName === "cachemanager";
@@ -86,11 +89,12 @@ export default function MicroserviceGeneralTab({
 
   const buildUrl = useCallback(
     (path: string) => {
-      const ms = microservice.replace(/^\/+|\/+$/g, "");
+      const raw = microservice.replace(/^\/+|\/+$/g, "");
+      const ms = lowerName === "rediswsbridge" ? "redis-ws-bridge" : raw;
       const p = path.replace(/^\/+/, "");
       return `${env.apiBaseUrl}/${ms}/${p}`;
     },
-    [microservice]
+    [microservice, lowerName]
   );
 
   const parseJsonSafely = async (response: Response) => {
@@ -206,6 +210,24 @@ export default function MicroserviceGeneralTab({
       .catch(() => {
         onHealthChange?.(null);
       });
+
+    if (lowerName === "market-data-service") {
+      setIbkrStatusState("loading");
+      setIbkrStatusError(null);
+      apiGet("ibkr/status")
+        .then((data) => {
+          setIbkrStatus(data as Record<string, any>);
+          setIbkrStatusState("idle");
+        })
+        .catch((err: any) => {
+          setIbkrStatusError(err?.message || "Errore recupero status IBKR");
+          setIbkrStatusState("error");
+        });
+    } else {
+      setIbkrStatus(null);
+      setIbkrStatusState("idle");
+      setIbkrStatusError(null);
+    }
 
     if (hasDbControls) {
       setDbLoggerStatus("loading");
@@ -587,6 +609,63 @@ export default function MicroserviceGeneralTab({
                         <div className="mt-1 text-[11px] text-slate-500">Seleziona il livello di log del microservizio.</div>
                       </td>
                     </tr>
+                    {lowerName === "market-data-service" && (
+                      <tr>
+                        <td className="pr-3 font-semibold text-slate-600">IBKR Bridge</td>
+                        <td className="py-1">
+                          {ibkrStatusState === "loading" && (
+                            <div className="text-[11px] text-slate-500">Caricamento status...</div>
+                          )}
+                          {ibkrStatusError && (
+                            <div className="text-[11px] text-rose-600">{ibkrStatusError}</div>
+                          )}
+                          {!ibkrStatusError && ibkrStatusState !== "loading" && (
+                            <div className="space-y-1 text-[11px] text-slate-700">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`h-2 w-2 rounded-full ${
+                                    ibkrStatus?.wsConnected ? "bg-emerald-500" : "bg-rose-500"
+                                  }`}
+                                />
+                                <span className="font-semibold">
+                                  WS {ibkrStatus?.wsConnected ? "connesso" : "disconnesso"}
+                                </span>
+                              </div>
+                              <div>
+                                Auth:{" "}
+                                <span className="font-semibold">
+                                  {ibkrStatus?.lastAuthStatus?.authenticated ? "OK" : "NO"}
+                                </span>
+                              </div>
+                              <div>
+                                Bridge:{" "}
+                                <span
+                                  className={`font-semibold ${
+                                    ibkrStatus?.lastHmdsInitOk === false
+                                      ? "text-rose-600"
+                                      : "text-slate-700"
+                                  }`}
+                                >
+                                  {ibkrStatus?.lastHmdsInitOk === false
+                                    ? "DOWN"
+                                    : ibkrStatus?.lastHmdsError
+                                    ? ibkrStatus.lastHmdsError
+                                    : "OK"}
+                                </span>
+                              </div>
+                              {ibkrStatus?.lastHmdsInitOk === false && (
+                                <div className="text-[10px] text-rose-600">
+                                  HMDS init non riuscito
+                                </div>
+                              )}
+                              <div className="text-[10px] text-slate-500">
+                                Last tickle: {formatDateTime(ibkrStatus?.lastTickleAt)}
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
                     <tr>
                       <td className="pr-3 font-semibold text-slate-600">Data Provider</td>
                       <td className="py-1">

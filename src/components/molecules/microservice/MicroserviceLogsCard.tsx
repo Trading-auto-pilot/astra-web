@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import BaseButton from "../../atoms/base/buttons/BaseButton";
 import AppIcon from "../../atoms/icon/AppIcon";
+import { redisWsBridgeClient } from "../../../services/ws/redisWsBridgeClient";
 import { env } from "../../../config/env";
 
 type LogRow = {
@@ -51,14 +52,69 @@ const levelColor: Record<string, string> = {
 
 export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props) {
   const [rows, setRows] = useState<LogRow[]>([]);
+  const [liveRows, setLiveRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [wsError, setWsError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [pageSize, setPageSize] = useState<number>(limit || 15);
   const [onlyThisService, setOnlyThisService] = useState(false);
-
   const token = useMemo(() => getToken(), []);
+
+  const getTopics = () => {
+    const base = "DEV";
+    if (!onlyThisService) return `${base}.*`;
+    const ms = microservice ? String(microservice).trim() : "";
+    return ms ? `${base}.${ms}.*` : `${base}.*`;
+  };
+
+  const normalizeMessage = (payload: any): LogRow | null => {
+    if (!payload || typeof payload !== "object") return null;
+    const rawChannel =
+      typeof payload?.__channel === "string"
+        ? payload.__channel
+        : typeof payload?.channel === "string"
+          ? payload.channel
+          : null;
+    const channelParts = rawChannel ? String(rawChannel).split(".") : [];
+    const hasLogsChannel = rawChannel ? rawChannel.includes(".logs.") : false;
+    if (!hasLogsChannel && !payload?.level && payload?.type !== "log") return null;
+
+    const level =
+      payload?.level ||
+      (channelParts.length ? channelParts[channelParts.length - 1] : undefined) ||
+      "log";
+    const channelService = channelParts.length > 1 ? channelParts[1] : undefined;
+    const channelModule = channelParts.length > 2 ? channelParts[2] : undefined;
+    const entryService = payload?.microservice || channelService || microservice || "-";
+    const entryModule = payload?.module || payload?.moduleName || channelModule || "-";
+    const entryMessage =
+      typeof payload?.message === "string"
+        ? payload.message
+        : payload?.message
+          ? JSON.stringify(payload.message)
+          : payload?.msg
+            ? String(payload.msg)
+            : JSON.stringify(payload);
+    const entryTimestamp = payload?.ts || payload?.timestamp || payload?.time;
+
+    if (onlyThisService && microservice) {
+      if (String(entryService).toLowerCase() !== String(microservice).toLowerCase()) return null;
+    }
+
+    return {
+      id: payload?.id || `live-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      timestamp: entryTimestamp,
+      level,
+      microservice: entryService,
+      module: entryModule,
+      functionName: payload?.functionName,
+      message: entryMessage,
+      meta: payload,
+      __live: true,
+    };
+  };
 
   const fetchLogs = async (pageIndex = 0, sizeArg?: number) => {
     setLoading(true);
@@ -91,6 +147,7 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
             ? data.items
             : [];
       setRows(items);
+      setLiveRows([]);
       const metaPage =
         typeof data?.page === "number"
           ? data.page
@@ -115,6 +172,42 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
     fetchLogs(0, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [microservice, pageSize, onlyThisService]);
+
+  useEffect(() => {
+    setWsError(null);
+    const unsubscribe = redisWsBridgeClient.subscribe({
+      filter: (msg) => {
+        if (!msg || typeof msg !== "object") return false;
+        if (onlyThisService && microservice) {
+          const service = String(msg?.microservice || "").toLowerCase();
+          if (service && service !== String(microservice).toLowerCase()) return false;
+        }
+        const channel =
+          typeof msg?.__channel === "string" ? msg.__channel : typeof msg?.channel === "string" ? msg.channel : "";
+        if (channel && !channel.startsWith("DEV.")) return false;
+        return channel.includes(".logs.") || typeof msg?.level === "string" || msg?.type === "log";
+      },
+      onMessage: (payload) => {
+        const entry = normalizeMessage(payload);
+        if (!entry) return;
+        setLiveRows((prev) => {
+          const next = [entry, ...prev];
+          return next.slice(0, 200);
+        });
+      },
+      onStatus: (status, detail) => {
+        if (status === "error" || status === "closed") {
+          setWsError(detail || "Errore connessione websocket");
+        } else if (status === "open") {
+          setWsError(null);
+        }
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [microservice, onlyThisService]);
 
   const applyPageSize = (value: number) => {
     const next = Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), 1000) : 15;
@@ -170,6 +263,11 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
           {error}
         </div>
       )}
+      {wsError && (
+        <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+          {wsError}
+        </div>
+      )}
       <div className="overflow-x-auto">
         <div className="max-h-64 overflow-y-auto">
           <table className="min-w-full table-fixed divide-y divide-slate-200 text-[11px] text-slate-700">
@@ -201,7 +299,7 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
                   </td>
                 </tr>
               )}
-              {!loading && rows.length === 0 && (
+              {!loading && rows.length + liveRows.length === 0 && (
                 <tr>
                   <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={7}>
                     Nessun log disponibile
@@ -209,15 +307,19 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
                 </tr>
               )}
               {!loading &&
-                rows.map((row, idx) => {
+                [...liveRows, ...rows].map((row, idx) => {
                   const lvl = String(row.level || "").toLowerCase();
                   const pill = levelColor[lvl] || levelColor.log;
                   const isOwnService =
                     microservice && row.microservice
                       ? String(row.microservice).toLowerCase() === String(microservice).toLowerCase()
                       : true;
+                  const isLive = Boolean((row as any).__live);
                   return (
-                    <tr key={row.id || idx} className="hover:bg-slate-50">
+                    <tr
+                      key={row.id || idx}
+                      className={`hover:bg-slate-50 ${isLive ? "bg-amber-50/70" : ""}`}
+                    >
                       <td className={`px-3 py-2 whitespace-nowrap ${!isOwnService ? "text-slate-400" : ""}`}>
                         {row.id ?? "-"}
                       </td>
