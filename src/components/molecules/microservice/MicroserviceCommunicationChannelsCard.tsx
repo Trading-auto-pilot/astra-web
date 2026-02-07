@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import BaseButton from "../../atoms/base/buttons/BaseButton";
 import AppIcon from "../../atoms/icon/AppIcon";
 

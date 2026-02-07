@@ -39,7 +39,7 @@ const formatDateTime = (value?: string | null) => {
 };
 
 export default function MicroserviceDbSettingsCard({
-  microservice,
+  microservice: _microservice,
   dbLogger,
   dbLoggerStatus,
   dbLoggerError,
