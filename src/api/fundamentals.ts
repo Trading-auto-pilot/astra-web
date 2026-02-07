@@ -1,4 +1,5 @@
 import { env } from "../config/env";
+import { http, httpClient, parseJsonSafely } from "./httpClient";
 
 export type FundamentalRecord = {
   ticker?: string;
@@ -20,8 +21,7 @@ export type FundamentalRecord = {
   [key: string]: unknown;
 };
 
-const FUNDAMENTALS_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/fundamentals`;
-const GLOSSARY_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/glossary`;
+// FMP external API endpoints
 const FMP_VARIANTS_ENDPOINT = "https://financialmodelingprep.com/stable/search-exchange-variants";
 const FMP_INCOME_ENDPOINT = "https://financialmodelingprep.com/stable/income-statement";
 const FMP_BALANCE_ENDPOINT = "https://financialmodelingprep.com/stable/balance-sheet-statement";
@@ -43,16 +43,6 @@ const FMP_STOCK_SEARCH_ENDPOINT = "https://financialmodelingprep.com/stable/news
 const FMP_EOD_LIGHT_ENDPOINT = "https://financialmodelingprep.com/stable/historical-price-eod/light";
 const FMP_EOD_FULL_ENDPOINT = "https://financialmodelingprep.com/stable/historical-price-eod/full";
 const FMP_HISTORICAL_CHART_ENDPOINT = "https://financialmodelingprep.com/stable/historical-chart";
-const USER_FUNDAMENTALS_VIEW_ENDPOINT = `${env.apiBaseUrl}/tickerscanner/fundamentals/user-fundamentals-view`;
-
-const parseJsonSafely = async (response: Response) => {
-  const text = await response.text();
-  try {
-    return text ? JSON.parse(text) : {};
-  } catch {
-    return text;
-  }
-};
 
 export type GlossaryEntry = {
   description?: string;
@@ -66,28 +56,16 @@ export async function fetchGlossary(fileName: string, signal?: AbortSignal): Pro
   if (!normalized) return {};
 
   const finalName = normalized.endsWith(".json") ? normalized : `${normalized}.json`;
-  const url = `${GLOSSARY_ENDPOINT}/${encodeURIComponent(finalName)}`;
-
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    signal,
-  });
-
-  const data = await parseJsonSafely(res);
-
-  if (!res.ok) {
-    const message = (data as any)?.error ?? (data as any)?.message ?? "Unable to load glossary";
-    throw new Error(typeof message === "string" ? message : "Unable to load glossary");
-  }
+  const data = await httpClient<GlossaryDoc>(
+    `/tickerscanner/glossary/${encodeURIComponent(finalName)}`,
+    { method: "GET", signal, skipAuth: true }
+  );
 
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return {};
   }
 
-  return data as GlossaryDoc;
+  return data;
 }
 
 const extractRecords = (payload: any): FundamentalRecord[] => {
@@ -100,24 +78,7 @@ const extractRecords = (payload: any): FundamentalRecord[] => {
 };
 
 export async function fetchFundamentals(): Promise<FundamentalRecord[]> {
-  const token =
-    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
-
-  const response = await fetch(FUNDAMENTALS_ENDPOINT, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Unable to load fundamentals";
-    throw new Error(typeof message === "string" ? message : "Unable to load fundamentals");
-  }
-
+  const data = await http.get<unknown>("/tickerscanner/fundamentals");
   return extractRecords(data);
 }
 
@@ -125,58 +86,25 @@ export async function fetchUserFundamentalsView(
   pipeId?: number | string,
   options?: { date?: string }
 ): Promise<{ records: FundamentalRecord[]; meta?: Record<string, unknown> }> {
-  const token =
-    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
-
   const params = new URLSearchParams();
   if (options?.date) params.set("date", options.date);
-  const url = pipeId
-    ? `${USER_FUNDAMENTALS_VIEW_ENDPOINT}/${encodeURIComponent(String(pipeId))}${
+  const path = pipeId
+    ? `/tickerscanner/fundamentals/user-fundamentals-view/${encodeURIComponent(String(pipeId))}${
         params.toString() ? `?${params.toString()}` : ""
       }`
-    : `${USER_FUNDAMENTALS_VIEW_ENDPOINT}${params.toString() ? `?${params.toString()}` : ""}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+    : `/tickerscanner/fundamentals/user-fundamentals-view${params.toString() ? `?${params.toString()}` : ""}`;
 
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Unable to load user fundamentals";
-    throw new Error(typeof message === "string" ? message : "Unable to load user fundamentals");
-  }
-
-  return { records: extractRecords(data), meta: (data as any)?.meta };
+  const data = await http.get<any>(path);
+  return { records: extractRecords(data), meta: data?.meta };
 }
 
 export async function fetchFundamentalsHistory(params?: { symbol?: string; days?: number }) {
-  const token =
-    typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
-
   const search = new URLSearchParams();
   if (params?.symbol) search.set("symbol", params.symbol);
   if (params?.days != null && Number.isFinite(params.days)) search.set("days", String(params.days));
 
-  const url = `${FUNDAMENTALS_ENDPOINT}/history${search.toString() ? `?${search.toString()}` : ""}`;
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Unable to load fundamentals history";
-    throw new Error(typeof message === "string" ? message : "Unable to load fundamentals history");
-  }
+  const path = `/tickerscanner/fundamentals/history${search.toString() ? `?${search.toString()}` : ""}`;
+  const data = await http.get<unknown>(path);
 
   const records = extractRecords(data);
   // estrai elenco date disponibili (as_of_date)

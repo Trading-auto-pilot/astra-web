@@ -1,4 +1,4 @@
-import { env } from "../config/env";
+import { http, httpClient } from "./httpClient";
 
 export type TickerScanJob = {
   id: string;
@@ -29,95 +29,38 @@ export type TickerScanJobHistory = {
   updated_at?: string;
 };
 
-const buildUrl = (path: string) => `${env.apiBaseUrl}${path}`;
-
-const getToken = () => {
-  if (typeof localStorage === "undefined") return null;
-  return localStorage.getItem("astraai:auth:token");
-};
-
-const parseJsonSafely = async (response: Response) => {
-  const text = await response.text();
-  try {
-    return text ? JSON.parse(text) : {};
-  } catch {
-    return text;
-  }
-};
-
 export async function fetchTickerScanJobs(signal?: AbortSignal): Promise<TickerScanJob[]> {
-  const token = getToken();
-  const response = await fetch(buildUrl("/tickerscanner/scan/jobs"), {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal,
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? (data as any)?.error ?? "Unable to load scan jobs";
-    throw new Error(typeof message === "string" ? message : "Unable to load scan jobs");
-  }
-
-  if (Array.isArray((data as any)?.jobs)) return (data as any).jobs as TickerScanJob[];
+  const data = await httpClient<any>("/tickerscanner/scan/jobs", { method: "GET", signal });
+  if (Array.isArray(data?.jobs)) return data.jobs as TickerScanJob[];
   if (Array.isArray(data)) return data as TickerScanJob[];
   return [];
 }
 
 export async function fetchTickerScanJobHistory(limit = 20): Promise<TickerScanJobHistory[]> {
-  const data = await doRequest(
-    `/tickerscanner/fundamentals/ticker-scan-jobs?limit=${encodeURIComponent(String(limit))}`,
-    { method: "GET" }
-  );
-  if (Array.isArray((data as any)?.data)) return (data as any).data as TickerScanJobHistory[];
+  const data = await http.get<any>(`/tickerscanner/fundamentals/ticker-scan-jobs?limit=${encodeURIComponent(String(limit))}`);
+  if (Array.isArray(data?.data)) return data.data as TickerScanJobHistory[];
   if (Array.isArray(data)) return data as TickerScanJobHistory[];
   return [];
 }
 
-export async function deleteTickerScanJobHistory(id: number): Promise<any> {
-  return doRequest(`/tickerscanner/fundamentals/ticker-scan-jobs/${encodeURIComponent(String(id))}`, {
-    method: "DELETE",
-  });
+export async function deleteTickerScanJobHistory(id: number): Promise<unknown> {
+  return http.delete(`/tickerscanner/fundamentals/ticker-scan-jobs/${encodeURIComponent(String(id))}`);
 }
 
-const doRequest = async (path: string, options: RequestInit = {}) => {
-  const token = getToken();
-  const response = await fetch(buildUrl(path), {
-    method: options.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-
-  const data = await parseJsonSafely(response);
-  if (!response.ok) {
-    const message = (data as any)?.message ?? (data as any)?.error ?? "Request failed";
-    throw new Error(typeof message === "string" ? message : "Request failed");
-  }
-  return data;
-};
-
-export async function startTickerScan(): Promise<any> {
-  return doRequest("/tickerscanner/scan", { method: "GET" });
+export async function startTickerScan(): Promise<unknown> {
+  return http.get("/tickerscanner/scan");
 }
 
-export async function startTickerScanForce(): Promise<any> {
-  return doRequest("/tickerscanner/scan/force", { method: "GET" });
+export async function startTickerScanForce(): Promise<unknown> {
+  return http.get("/tickerscanner/scan/force");
 }
 
-export async function refreshTickerMomentum(): Promise<any> {
-  return doRequest("/tickerscanner/momentum/refresh", { method: "POST" });
+export async function refreshTickerMomentum(): Promise<unknown> {
+  return http.post("/tickerscanner/momentum/refresh");
 }
 
-export async function updateMarketDaily(): Promise<any> {
-  return doRequest("/tickerscanner/fundamentals/update-market-daily", { method: "POST" });
+export async function updateMarketDaily(): Promise<unknown> {
+  return http.post("/tickerscanner/fundamentals/update-market-daily");
 }
 
 export type MarketDailyJob = {
@@ -136,8 +79,8 @@ export type MarketDailyJob = {
 };
 
 export async function fetchMarketDailyJobs(): Promise<MarketDailyJob[]> {
-  const data = await doRequest("/tickerscanner/fundamentals/update-market-daily", { method: "GET" });
-  if (Array.isArray((data as any)?.jobs)) return (data as any).jobs as MarketDailyJob[];
+  const data = await http.get<any>("/tickerscanner/fundamentals/update-market-daily");
+  if (Array.isArray(data?.jobs)) return data.jobs as MarketDailyJob[];
   if (Array.isArray(data)) return data as MarketDailyJob[];
   return [];
 }
@@ -160,31 +103,22 @@ export type MarketDailyJobHistory = {
 };
 
 export async function fetchMarketDailyJobHistory(limit = 20): Promise<MarketDailyJobHistory[]> {
-  const data = await doRequest(
-    `/tickerscanner/fundamentals/market-daily-jobs?limit=${encodeURIComponent(String(limit))}`,
-    { method: "GET" }
-  );
-  if (Array.isArray((data as any)?.data)) return (data as any).data as MarketDailyJobHistory[];
+  const data = await http.get<any>(`/tickerscanner/fundamentals/market-daily-jobs?limit=${encodeURIComponent(String(limit))}`);
+  if (Array.isArray(data?.data)) return data.data as MarketDailyJobHistory[];
   if (Array.isArray(data)) return data as MarketDailyJobHistory[];
   return [];
 }
 
-export async function deleteMarketDailyJobHistory(id: number): Promise<any> {
-  return doRequest(`/tickerscanner/fundamentals/market-daily-jobs/${encodeURIComponent(String(id))}`, {
-    method: "DELETE",
-  });
+export async function deleteMarketDailyJobHistory(id: number): Promise<unknown> {
+  return http.delete(`/tickerscanner/fundamentals/market-daily-jobs/${encodeURIComponent(String(id))}`);
 }
 
-export async function cancelMarketDailyJob(jobId: string): Promise<any> {
-  return doRequest(`/tickerscanner/fundamentals/update-market-daily/${encodeURIComponent(jobId)}`, {
-    method: "DELETE",
-  });
+export async function cancelMarketDailyJob(jobId: string): Promise<unknown> {
+  return http.delete(`/tickerscanner/fundamentals/update-market-daily/${encodeURIComponent(jobId)}`);
 }
 
-export async function cancelTickerScanJob(jobId: string): Promise<any> {
-  return doRequest(`/tickerscanner/scan/jobs/${encodeURIComponent(jobId)}`, {
-    method: "DELETE",
-  });
+export async function cancelTickerScanJob(jobId: string): Promise<unknown> {
+  return http.delete(`/tickerscanner/scan/jobs/${encodeURIComponent(jobId)}`);
 }
 
 export type UserDailyJob = {
@@ -229,62 +163,46 @@ export async function startUserDailyJob(
   version?: string,
   name?: string
 ): Promise<{ jobId: string }> {
-  const body: any = { date };
+  const body: Record<string, unknown> = { date };
   if (pipeId !== undefined && pipeId !== null) body.pipeId = pipeId;
   if (version) body.version = version;
   if (name) body.name = name;
-  return doRequest("/tickerscanner/fundamentals/user-daily-scores", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return http.post<{ jobId: string }>("/tickerscanner/fundamentals/user-daily-scores", body);
 }
 
 export async function fetchUserDailyJobs(): Promise<UserDailyJob[]> {
-  const data = await doRequest("/tickerscanner/fundamentals/user-daily-scores", { method: "GET" });
-  if (Array.isArray((data as any)?.jobs)) return (data as any).jobs as UserDailyJob[];
+  const data = await http.get<any>("/tickerscanner/fundamentals/user-daily-scores");
+  if (Array.isArray(data?.jobs)) return data.jobs as UserDailyJob[];
   if (Array.isArray(data)) return data as UserDailyJob[];
   return [];
 }
 
-export async function cancelUserDailyJob(jobId: string): Promise<any> {
-  return doRequest(`/tickerscanner/fundamentals/user-daily-scores/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+export async function cancelUserDailyJob(jobId: string): Promise<unknown> {
+  return http.delete(`/tickerscanner/fundamentals/user-daily-scores/${encodeURIComponent(jobId)}`);
 }
 
 export async function fetchUserDailyScoreJobs(limit = 20): Promise<UserDailyScoreJob[]> {
-  const data = await doRequest(
-    `/tickerscanner/fundamentals/user-daily-score-jobs?limit=${encodeURIComponent(String(limit))}`,
-    { method: "GET" }
-  );
-  if (Array.isArray((data as any)?.data)) return (data as any).data as UserDailyScoreJob[];
+  const data = await http.get<any>(`/tickerscanner/fundamentals/user-daily-score-jobs?limit=${encodeURIComponent(String(limit))}`);
+  if (Array.isArray(data?.data)) return data.data as UserDailyScoreJob[];
   if (Array.isArray(data)) return data as UserDailyScoreJob[];
   return [];
 }
 
-export async function deleteUserDailyScoreJob(id: number): Promise<any> {
-  return doRequest(`/tickerscanner/fundamentals/user-daily-score-jobs/${encodeURIComponent(String(id))}`, {
-    method: "DELETE",
-  });
+export async function deleteUserDailyScoreJob(id: number): Promise<unknown> {
+  return http.delete(`/tickerscanner/fundamentals/user-daily-score-jobs/${encodeURIComponent(String(id))}`);
 }
 
-export async function fetchScoresDailyByUser(pipeId: number, scoreDate: string): Promise<any[]> {
-  const data = await doRequest(
-    `/tickerscanner/fundamentals/scores-daily/by-user/${encodeURIComponent(String(pipeId))}/${encodeURIComponent(
-      scoreDate
-    )}`,
-    { method: "GET" }
-  );
-  if (Array.isArray((data as any)?.data)) return (data as any).data as any[];
-  if (Array.isArray(data)) return data as any[];
+export async function fetchScoresDailyByUser(pipeId: number, scoreDate: string): Promise<unknown[]> {
+  const data = await http.get<any>(`/tickerscanner/fundamentals/scores-daily/by-user/${encodeURIComponent(String(pipeId))}/${encodeURIComponent(scoreDate)}`);
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data)) return data;
   return [];
 }
 
-export async function fetchMarketDailyCompare(tradeDate: string): Promise<any[]> {
-  const data = await doRequest(
-    `/tickerscanner/fundamentals/market-daily/compare?trade_date=${encodeURIComponent(tradeDate)}`,
-    { method: "GET" }
-  );
-  if (Array.isArray((data as any)?.data)) return (data as any).data as any[];
-  if (Array.isArray(data)) return data as any[];
+export async function fetchMarketDailyCompare(tradeDate: string): Promise<unknown[]> {
+  const data = await http.get<any>(`/tickerscanner/fundamentals/market-daily/compare?trade_date=${encodeURIComponent(tradeDate)}`);
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data)) return data;
   return [];
 }
 
@@ -298,8 +216,8 @@ export type UserPipe = {
 };
 
 export async function fetchUserPipes(): Promise<UserPipe[]> {
-  const data = await doRequest("/tickerscanner/fundamentals/users/pipes", { method: "GET" });
-  if (Array.isArray((data as any)?.data)) return (data as any).data as UserPipe[];
+  const data = await http.get<any>("/tickerscanner/fundamentals/users/pipes");
+  if (Array.isArray(data?.data)) return data.data as UserPipe[];
   if (Array.isArray(data)) return data as UserPipe[];
   return [];
 }
