@@ -60,34 +60,62 @@ export default function MarketDataServiceMicroservicePage({
   const [marketFieldsSaveStatus, setMarketFieldsSaveStatus] = useState<Status>("idle");
   const [marketFieldsSaveError, setMarketFieldsSaveError] = useState<string | null>(null);
 
-  // Carica subscriptions all'avvio
-  useEffect(() => {
+  const fetchSubscriptions = useCallback(async () => {
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     setSubscriptionStatus("loading");
-    fetch(`${env.apiBaseUrl}/market-data-service/subscriptions`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.ok === false)
-          throw new Error(data?.error || data?.message || "Errore get subscriptions");
-        const list = Array.isArray(data?.subscribed)
-          ? data.subscribed
-          : Array.isArray(data?.tickers)
-            ? data.tickers
-            : [];
-        setSubscriptionTickers(list);
-        setSubscriptionStatus("idle");
-      })
-      .catch((err) => {
-        setSubscriptionStatus("error");
-        setSubscriptionError(err?.message || "Errore get subscriptions");
+    setSubscriptionError(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/market-data-service/subscriptions`, {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
+      if (res.status === 304) {
+        setSubscriptionStatus("idle");
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore get subscriptions");
+      }
+      const rawList =
+        (Array.isArray(data) && data) ||
+        (Array.isArray(data?.subscribed) && data.subscribed) ||
+        (Array.isArray(data?.tickers) && data.tickers) ||
+        (Array.isArray(data?.subscriptions) && data.subscriptions) ||
+        (Array.isArray(data?.items) && data.items) ||
+        (Array.isArray(data?.data) && data.data) ||
+        (Array.isArray(data?.result) && data.result) ||
+        (Array.isArray(data?.data?.subscribed) && data.data.subscribed) ||
+        (Array.isArray(data?.data?.tickers) && data.data.tickers) ||
+        [];
+      const normalized = rawList
+        .map((item: any) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object") {
+            return item.ticker || item.symbol || item.code || "";
+          }
+          return "";
+        })
+        .map((item: string) => item.trim())
+        .filter(Boolean);
+      setSubscriptionTickers(normalized);
+      setSubscriptionStatus("idle");
+    } catch (err: any) {
+      setSubscriptionStatus("error");
+      setSubscriptionError(err?.message || "Errore get subscriptions");
+    }
   }, []);
+
+  // Carica subscriptions all'avvio e quando si entra nel tab
+  useEffect(() => {
+    if (activeTab === "subscription") {
+      fetchSubscriptions();
+    }
+  }, [activeTab, fetchSubscriptions]);
 
   // Carica market fields all'avvio
   useEffect(() => {
@@ -157,7 +185,7 @@ export default function MarketDataServiceMicroservicePage({
     } finally {
       setSubscriptionSaveStatus("idle");
     }
-  }, [subscriptionInput, subscriptionTickers]);
+  }, [fetchSubscriptions, subscriptionInput, subscriptionTickers]);
 
   const handleSubscriptionDelete = useCallback(
     async (ticker: string) => {
@@ -235,6 +263,7 @@ export default function MarketDataServiceMicroservicePage({
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || data?.message || "Errore resubscribe");
       }
+      await fetchSubscriptions();
       setSubscriptionSaveStatus("idle");
     } catch (err: any) {
       setSubscriptionSaveStatus("error");
@@ -242,7 +271,7 @@ export default function MarketDataServiceMicroservicePage({
     } finally {
       setSubscriptionSaveStatus("idle");
     }
-  }, []);
+  }, [fetchSubscriptions]);
 
   const handleMarketFieldsSave = useCallback(async () => {
     if (!marketFieldsSelected.length) {
@@ -353,8 +382,18 @@ export default function MarketDataServiceMicroservicePage({
                 e vai sul tab Websocket.
               </div>
             </div>
-            <div className="text-[11px] font-semibold text-slate-500">
-              {subscriptionStatus === "loading" ? "Caricamento..." : `${subscriptionTickers.length} ticker`}
+            <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-500">
+              <span>
+                {subscriptionStatus === "loading" ? "Caricamento..." : `${subscriptionTickers.length} ticker`}
+              </span>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                onClick={fetchSubscriptions}
+                disabled={subscriptionStatus === "loading"}
+              >
+                Aggiorna
+              </button>
             </div>
           </div>
 

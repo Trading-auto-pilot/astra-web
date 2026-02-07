@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import SectionHeader from "../molecules/content/SectionHeader";
 import AppIcon from "../atoms/icon/AppIcon";
 
@@ -10,6 +10,7 @@ import RedisWsBridgeMicroservicePage from "./microservices/RedisWsBridgeMicroser
 import CachemanagerMicroservicePage from "./microservices/CachemanagerMicroservicePage";
 import DecisionEngineMicroservicePage from "./microservices/DecisionEngineMicroservicePage";
 import IbkrBridgeMicroservicePage from "./microservices/IbkrBridgeMicroservicePage";
+import IBKRKeepaliceMicroservicePage from "./microservices/IBKRKeepaliceMicroservicePage";
 import SchedulerMicroservicePage from "./microservices/SchedulerMicroservicePage";
 import IbkrgwMicroservicePage from "./microservices/IbkrgwMicroservicePage";
 
@@ -53,8 +54,17 @@ export default function AdminMicroserviceDetailPage() {
   const [health, setHealth] = useState<Record<string, any> | null>(null);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
 
-  // Get microservice slug from URL hash
-  const slug = useMemo(() => getSlugFromHash(), []);
+  // Get microservice slug from URL hash - use state to react to hash changes
+  const [slug, setSlug] = useState<string | null>(() => getSlugFromHash());
+
+  // Listen for hash changes to update slug
+  useEffect(() => {
+    const handleHashChange = () => {
+      setSlug(getSlugFromHash());
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   // Normalize slug for comparison
   const normalizedSlug = slug?.toLowerCase();
@@ -132,6 +142,15 @@ export default function AdminMicroserviceDetailPage() {
           />
         );
 
+      case "ibkr-keepalive":
+        return (
+          <IBKRKeepaliceMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
       case "scheduler":
         return (
           <SchedulerMicroservicePage
@@ -191,7 +210,8 @@ export default function AdminMicroserviceDetailPage() {
         }
       />
 
-      {renderMicroservice()}
+      {/* key forces re-mount when navigating between microservices */}
+      <div key={slug || "unknown"}>{renderMicroservice()}</div>
 
       {/* Release Notes Modal */}
       {showReleaseModal && release && (

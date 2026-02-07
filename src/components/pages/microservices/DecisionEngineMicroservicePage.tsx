@@ -203,7 +203,7 @@ export default function DecisionEngineMicroservicePage({
     fetch(
       `https://financialmodelingprep.com/stable/quote?symbol=${encodeURIComponent(
         symbol
-      )}&apikey=4c69521fc50b653ed6e006f094a265f7`
+      )}&apikey=${env.fmpApiKey}`
     )
       .then(async (res) => {
         const data = await res.json().catch(() => []);
@@ -555,6 +555,7 @@ export default function DecisionEngineMicroservicePage({
                     setLiveError(null);
                     const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
                     try {
+                      // 1. Avvia live su decision-engine
                       const res = await fetch(
                         `${env.apiBaseUrl}/decision-engine/spot-finder/live/${encodeURIComponent(
                           pipeSelectedId
@@ -570,8 +571,26 @@ export default function DecisionEngineMicroservicePage({
                       if (!res.ok || data?.ok === false) {
                         throw new Error(data?.error || data?.message || "Errore avvio live");
                       }
+                      const tickers = Array.isArray(data?.subscribed) ? data.subscribed : [];
+
+                      // 2. Sottoscrivi i ticker su market-data-service
+                      if (tickers.length > 0) {
+                        const subscribeRes = await fetch(`${env.apiBaseUrl}/market-data-service/subscriptions`, {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                          },
+                          body: JSON.stringify({ tickers }),
+                        });
+                        const subscribeData = await subscribeRes.json().catch(() => ({}));
+                        if (!subscribeRes.ok || subscribeData?.ok === false) {
+                          throw new Error(subscribeData?.error || subscribeData?.message || "Errore sottoscrizione ticker");
+                        }
+                      }
+
                       setLiveActive(true);
-                      setLiveTickers(Array.isArray(data?.subscribed) ? data.subscribed : []);
+                      setLiveTickers(tickers);
                       setLiveStatus("idle");
                     } catch (err: any) {
                       setLiveStatus("error");
@@ -593,6 +612,25 @@ export default function DecisionEngineMicroservicePage({
                     setLiveError(null);
                     const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
                     try {
+                      // 1. Unsubscribe dai ticker su market-data-service
+                      if (liveTickers.length > 0) {
+                        await Promise.all(
+                          liveTickers.map((ticker) =>
+                            fetch(
+                              `${env.apiBaseUrl}/market-data-service/subscriptions/${encodeURIComponent(ticker)}`,
+                              {
+                                method: "DELETE",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                                },
+                              }
+                            )
+                          )
+                        );
+                      }
+
+                      // 2. Ferma live su decision-engine
                       const res = await fetch(
                         `${env.apiBaseUrl}/decision-engine/spot-finder/live/${encodeURIComponent(
                           pipeSelectedId
