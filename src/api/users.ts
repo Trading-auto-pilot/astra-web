@@ -1,4 +1,4 @@
-import { env } from "../config/env";
+import { http, httpClient, buildUrl, parseJsonSafely } from "./httpClient";
 
 export type AdminUser = {
   id?: string;
@@ -12,86 +12,20 @@ export type AdminUser = {
   [key: string]: unknown;
 };
 
-const buildUrl = (path: string) => `${env.apiBaseUrl}${path}`;
-
-const getToken = () => {
-  if (typeof localStorage === "undefined") return null;
-  return localStorage.getItem("astraai:auth:token");
-};
-
-const parseJsonSafely = async (response: Response) => {
-  const text = await response.text();
-  try {
-    return text ? JSON.parse(text) : {};
-  } catch {
-    return text;
-  }
-};
-
 export async function fetchAdminUsers(signal?: AbortSignal): Promise<AdminUser[]> {
-  const token = getToken();
-  const response = await fetch(buildUrl("/auth/admin/user"), {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal,
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile recuperare gli utenti";
-    throw new Error(typeof message === "string" ? message : "Impossibile recuperare gli utenti");
-  }
-
-  return Array.isArray(data) ? (data as AdminUser[]) : [];
+  const data = await httpClient<AdminUser[]>("/auth/admin/user", { method: "GET", signal });
+  return Array.isArray(data) ? data : [];
 }
 
-export async function fetchAdminUserPermissions(userId: string | number, signal?: AbortSignal): Promise<any[]> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/permissions`), {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal,
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile recuperare i permessi";
-    throw new Error(typeof message === "string" ? message : "Impossibile recuperare i permessi");
-  }
-
-  if (Array.isArray(data)) return data as any[];
-  if (Array.isArray((data as any)?.permissions)) return (data as any).permissions as any[];
+export async function fetchAdminUserPermissions(userId: string | number, signal?: AbortSignal): Promise<unknown[]> {
+  const data = await httpClient<any>(`/auth/admin/user/${userId}/permissions`, { method: "GET", signal });
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.permissions)) return data.permissions;
   return [];
 }
 
 export async function createAdminUser(payload: Record<string, unknown>): Promise<AdminUser> {
-  const token = getToken();
-  const response = await fetch(buildUrl("/auth/admin/user"), {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile creare l'utente";
-    throw new Error(typeof message === "string" ? message : "Impossibile creare l'utente");
-  }
-
-  return data as AdminUser;
+  return http.post<AdminUser>("/auth/admin/user", payload);
 }
 
 export async function updateAdminUser(
@@ -99,132 +33,64 @@ export async function updateAdminUser(
   payload: Record<string, unknown>,
   tokenOverride?: string | null
 ): Promise<AdminUser> {
-  const token = tokenOverride ?? getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}`), {
-    method: "PUT",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile aggiornare l'utente";
-    throw new Error(typeof message === "string" ? message : "Impossibile aggiornare l'utente");
+  // Special case: supports token override for password change flow
+  if (tokenOverride) {
+    const response = await fetch(buildUrl(`/auth/admin/user/${userId}`), {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${tokenOverride}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJsonSafely(response);
+    if (!response.ok) {
+      const message = (data as any)?.message ?? "Impossibile aggiornare l'utente";
+      throw new Error(typeof message === "string" ? message : "Impossibile aggiornare l'utente");
+    }
+    return data as AdminUser;
   }
-
-  return data as AdminUser;
+  return http.put<AdminUser>(`/auth/admin/user/${userId}`, payload);
 }
 
 export async function updateAdminUserPermission(
   userId: string | number,
   permId: string | number,
   payload: Record<string, unknown>
-): Promise<any> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/permissions/${permId}`), {
-    method: "PUT",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile aggiornare il permesso";
-    throw new Error(typeof message === "string" ? message : "Impossibile aggiornare il permesso");
-  }
-
-  return data;
+): Promise<unknown> {
+  return http.put(`/auth/admin/user/${userId}/permissions/${permId}`, payload);
 }
 
-export async function createAdminUserPermission(userId: string | number, payload: Record<string, unknown>): Promise<any> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/permissions`), {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile creare il permesso";
-    throw new Error(typeof message === "string" ? message : "Impossibile creare il permesso");
-  }
-
-  return data;
+export async function createAdminUserPermission(userId: string | number, payload: Record<string, unknown>): Promise<unknown> {
+  return http.post(`/auth/admin/user/${userId}/permissions`, payload);
 }
 
 export async function deleteAdminUserPermission(userId: string | number, permId: string | number): Promise<void> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/permissions/${permId}`), {
-    method: "DELETE",
-    credentials: "include",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  // Idempotent delete: treat missing permission as success.
-  if (response.status === 404) return;
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile cancellare il permesso";
-    throw new Error(typeof message === "string" ? message : "Impossibile cancellare il permesso");
+  try {
+    await http.delete(`/auth/admin/user/${userId}/permissions/${permId}`);
+  } catch (err: any) {
+    // Idempotent delete: treat missing permission as success.
+    if (err?.status === 404) return;
+    throw err;
   }
 }
 
 export async function deleteAdminUser(userId: string | number): Promise<void> {
-  const token = getToken();
-  const baseHeaders = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-
-  const response = await fetch(buildUrl("/auth/admin/user"), {
-    method: "DELETE",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...baseHeaders,
-    },
-    body: JSON.stringify({ id: userId }),
-  });
-
-  // Backward-compatible fallback (some environments expose DELETE on `/auth/admin/user/:id`).
-  if (response.status === 404 || response.status === 405) {
-    const fallback = await fetch(buildUrl(`/auth/admin/user/${userId}`), {
+  // Try primary endpoint first, then fallback
+  try {
+    await httpClient("/auth/admin/user", {
       method: "DELETE",
-      credentials: "include",
-      headers: baseHeaders,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: userId }),
     });
-    const fallbackData = await parseJsonSafely(fallback);
-    if (!fallback.ok) {
-      const message = (fallbackData as any)?.message ?? "Impossibile cancellare l'utente";
-      throw new Error(typeof message === "string" ? message : "Impossibile cancellare l'utente");
+  } catch (err: any) {
+    // Backward-compatible fallback (some environments expose DELETE on `/auth/admin/user/:id`).
+    if (err?.status === 404 || err?.status === 405) {
+      await http.delete(`/auth/admin/user/${userId}`);
+      return;
     }
-    return;
-  }
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile cancellare l'utente";
-    throw new Error(typeof message === "string" ? message : "Impossibile cancellare l'utente");
+    throw err;
   }
 }
 
@@ -240,96 +106,33 @@ export async function fetchAdminUserClientNavigation(
   userId: string | number,
   signal?: AbortSignal
 ): Promise<ClientNavigationEntry[]> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/client-nav`), {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal,
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile recuperare la navigazione";
-    throw new Error(typeof message === "string" ? message : "Impossibile recuperare la navigazione");
-  }
-
-  return Array.isArray(data) ? (data as ClientNavigationEntry[]) : [];
+  const data = await httpClient<ClientNavigationEntry[]>(`/auth/admin/user/${userId}/client-nav`, { method: "GET", signal });
+  return Array.isArray(data) ? data : [];
 }
 
 export async function createAdminUserClientNavigation(
   userId: string | number,
   payload: Record<string, unknown>
-): Promise<any> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/client-nav`), {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile creare la navigazione";
-    throw new Error(typeof message === "string" ? message : "Impossibile creare la navigazione");
-  }
-
-  return data;
+): Promise<unknown> {
+  return http.post(`/auth/admin/user/${userId}/client-nav`, payload);
 }
 
 export async function updateAdminUserClientNavigation(
   userId: string | number,
   navId: string | number,
   payload: Record<string, unknown>
-): Promise<any> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/client-nav/${navId}`), {
-    method: "PUT",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile aggiornare la navigazione";
-    throw new Error(typeof message === "string" ? message : "Impossibile aggiornare la navigazione");
-  }
-
-  return data;
+): Promise<unknown> {
+  return http.put(`/auth/admin/user/${userId}/client-nav/${navId}`, payload);
 }
 
 export async function deleteAdminUserClientNavigation(
   userId: string | number,
   navId: string | number
 ): Promise<void> {
-  const token = getToken();
-  const response = await fetch(buildUrl(`/auth/admin/user/${userId}/client-nav/${navId}`), {
-    method: "DELETE",
-    credentials: "include",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  if (response.status === 404) return;
-
-  const data = await parseJsonSafely(response);
-
-  if (!response.ok) {
-    const message = (data as any)?.message ?? "Impossibile cancellare la navigazione";
-    throw new Error(typeof message === "string" ? message : "Impossibile cancellare la navigazione");
+  try {
+    await http.delete(`/auth/admin/user/${userId}/client-nav/${navId}`);
+  } catch (err: any) {
+    if (err?.status === 404) return;
+    throw err;
   }
 }
