@@ -51,9 +51,9 @@ export default function MarketDataServiceMicroservicePage({
   const [snapshotIntervalError, setSnapshotIntervalError] = useState<string | null>(null);
 
   // Stati per market fields
-  const [marketFieldsStatus, setMarketFieldsStatus] = useState<Status>("idle");
+  const [, setMarketFieldsStatus] = useState<Status>("idle");
   const [marketFieldsError, setMarketFieldsError] = useState<string | null>(null);
-  const [marketFields, setMarketFields] = useState<string[]>([]);
+  const [, setMarketFields] = useState<string[]>([]);
   const [marketFieldsSelected, setMarketFieldsSelected] = useState<string[]>([]);
   const [marketFieldsSearch, setMarketFieldsSearch] = useState("");
   const [marketFieldsModal, setMarketFieldsModal] = useState(false);

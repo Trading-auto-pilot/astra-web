@@ -559,7 +559,7 @@ export default function MicroserviceGeneralTab({
   );
 
   return (
-    <div className="mt-2 space-y-3">
+    <div className="mt-2 flex h-full min-h-0 flex-col gap-3">
       {isCache || isMarketData ? (
         /* Layout per cachemanager e market-data-service: 2 colonne - Sinistra (DbSettings + Card specifica) | Destra (CommunicationChannels) */
         <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
@@ -692,7 +692,12 @@ export default function MicroserviceGeneralTab({
       )}
 
       {/* Logs (per tutti, full width) */}
-      <MicroserviceLogsCard microservice={microservice} limit={100} />
+      <MicroserviceLogsCard
+        microservice={microservice}
+        limit={100}
+        fillHeight
+        className="flex-1 min-h-0"
+      />
 
       {showSettingsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

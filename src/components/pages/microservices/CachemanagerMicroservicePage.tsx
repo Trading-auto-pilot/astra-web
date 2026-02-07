@@ -180,21 +180,21 @@ export default function CachemanagerMicroservicePage({
   const [l2AuditResult, setL2AuditResult] = useState<any>(null);
   const [l2AuditTarget, setL2AuditTarget] = useState<string | null>(null);
   const [l2AuditLastRunAt, setL2AuditLastRunAt] = useState<string | null>(null);
-  const [showL2AuditModal, setShowL2AuditModal] = useState(false);
+  const [, setShowL2AuditModal] = useState(false);
 
-  // Stato per la visualizzazione dei file L2 (modale)
-  const [showL2FileModal, setShowL2FileModal] = useState(false);
-  const [l2FileName, setL2FileName] = useState<string | null>(null);
-  const [l2FileStatus, setL2FileStatus] = useState<Status>("idle");
-  const [l2FileError, setL2FileError] = useState<string | null>(null);
-  const [l2FileData, setL2FileData] = useState<any>(null);
-  const [l2FileMeta, setL2FileMeta] = useState<any>(null);
-  const [l2FileEditing, setL2FileEditing] = useState(false);
-  const [l2FileDraft, setL2FileDraft] = useState<string>("");
-  const [l2FileRequest, setL2FileRequest] = useState<Record<string, string> | null>(null);
-  const [l2FileTab, setL2FileTab] = useState<"json" | "table">("json");
-  const [l2FileTimeFilter, setL2FileTimeFilter] = useState<string>("");
-  const [l2FileTableDraft, setL2FileTableDraft] = useState<any[] | null>(null);
+  // Stato per la visualizzazione dei file L2 (modale) - preparato per futuri sviluppi
+  const [, setShowL2FileModal] = useState(false);
+  const [, setL2FileName] = useState<string | null>(null);
+  const [, setL2FileStatus] = useState<Status>("idle");
+  const [, setL2FileError] = useState<string | null>(null);
+  const [, setL2FileData] = useState<any>(null);
+  const [, setL2FileMeta] = useState<any>(null);
+  const [, setL2FileEditing] = useState(false);
+  const [, setL2FileDraft] = useState<string>("");
+  const [, setL2FileRequest] = useState<Record<string, string> | null>(null);
+  const [, setL2FileTab] = useState<"json" | "table">("json");
+  const [, setL2FileTimeFilter] = useState<string>("");
+  const [, setL2FileTableDraft] = useState<any[] | null>(null);
 
   // ========== USE EFFECTS ==========
 

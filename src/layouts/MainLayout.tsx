@@ -1,10 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Logo from "../components/atoms/media/Logo";
 import UserMenu from "../components/molecules/navigation/UserMenu";
 import { useRelease } from "../hooks/useReleaseInfo";
 import BaseButton from "../components/atoms/base/buttons/BaseButton";
 import { fetchServiceFlags } from "../api/serviceFlags";
-import { env } from "../config/env";
+import { redisWsBridgeClient } from "../services/ws/redisWsBridgeClient";
 
 export type MainLayoutProps = {
   children: ReactNode;
@@ -130,32 +130,44 @@ export function MainLayout({
   const [microserviceMenuOpen, setMicroserviceMenuOpen] = useState(false);
   const [gwStatus, setGwStatus] = useState("UNKNOWN");
   const [gwInfo, setGwInfo] = useState<Record<string, unknown> | null>(null);
+  const [keepaliveTelemetry, setKeepaliveTelemetry] = useState<Record<string, any> | null>(null);
+  const [ssodhTelemetry, setSsodhTelemetry] = useState<Record<string, any> | null>(null);
+  const [gwLastSource, setGwLastSource] = useState<string | null>(null);
+  const keepaliveRef = useRef<Record<string, any> | null>(null);
+  const ssodhRef = useRef<Record<string, any> | null>(null);
   const [showGwModal, setShowGwModal] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedAccountType, setSelectedAccountType] = useState<string | null>(null);
-  const getAuthToken = () =>
-    typeof localStorage === "undefined" ? null : localStorage.getItem("astraai:auth:token");
 
   const statusIndicatorTone =
-    gwStatus === "GW_UP"
+    gwStatus === "GW_BRIDGE_OK"
       ? "bg-emerald-500"
-      : gwStatus === "GW_NO_AUTH"
-        ? "bg-amber-400"
-        : gwStatus === "GW_UP_BUT_ERROR"
-          ? "bg-amber-500"
-          : gwStatus === "GW_DOWN"
+      : gwStatus === "GW_UP"
+        ? "bg-emerald-500"
+        : gwStatus === "GW_NO_AUTH"
+          ? "bg-amber-400"
+          : gwStatus === "GW_UP_BUT_ERROR"
             ? "bg-red-500"
-            : "bg-slate-400";
-  const statusIndicatorPulse = gwStatus === "GW_NO_AUTH" ? "status-indicator--blink" : "";
+            : gwStatus === "GW_DOWN"
+              ? "bg-red-500"
+              : "bg-slate-400";
+  const statusIndicatorPulse =
+    gwStatus === "GW_UP" || gwStatus === "GW_UP_BUT_ERROR" ? "status-indicator--blink" : "";
 
-  const computeGwStatus = (keepalive: any) => {
+  const computeGwStatus = (keepalive: any, ssodh: any, fallback?: string) => {
     const authStatus = keepalive?.lastAuthStatus;
     const tickleStatus = keepalive?.lastTickleStatus;
     const status = typeof authStatus === "number" ? authStatus : tickleStatus;
-    if (status === 200) return "GW_UP";
     if (status === 401) return "GW_NO_AUTH";
+    if (status === 200) {
+      const authOk = ssodh?.ssodhInit?.authStatus?.data?.authenticated;
+      const ssodhOk = ssodh?.ssodhInit?.ssodhInit?.data?.passed;
+      if (authOk && ssodhOk) return "GW_BRIDGE_OK";
+      if (ssodh?.ssodhInit) return "GW_UP_BUT_ERROR";
+      return "GW_UP";
+    }
     if (typeof status === "number") return "GW_UP_BUT_ERROR";
-    return "GW_DOWN";
+    return fallback || "GW_DOWN";
   };
 
   const closeNav = () => setOpenNav(false);
@@ -204,39 +216,52 @@ export function MainLayout({
   }, []);
 
   useEffect(() => {
-    let isActive = true;
-    const fetchGwStatus = async () => {
-      try {
-        const token = getAuthToken();
-        const resp = await fetch(`${env.apiBaseUrl}/ibkr-keepalive/status/info`, {
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        if (!resp.ok) {
-          throw new Error("Status request failed");
+    redisWsBridgeClient.start();
+    const unsubscribe = redisWsBridgeClient.subscribe({
+      filter: (msg) => {
+        const channel = msg?.__channel || msg?.channel;
+        if (typeof channel === "string") {
+          return (
+            channel.endsWith(".ibkr-keepalive.telemetry") ||
+            channel.endsWith(".ibkr-bridge.telemetry")
+          );
         }
-        const data = (await resp.json()) as Record<string, unknown>;
-        const status = computeGwStatus((data as any)?.keepalive);
-        if (isActive) {
-          setGwStatus(typeof status === "string" && status ? status : "UNKNOWN");
-          setGwInfo(data);
-        }
-      } catch {
-        if (isActive) {
-          setGwStatus("UNKNOWN");
-          setGwInfo(null);
-        }
-      }
-    };
+        return msg?.type === "keepalive";
+      },
+      onMessage: (msg) => {
+        const channel = msg?.__channel || msg?.channel || "";
+        const payload = msg?.keepalive || msg?.payload || msg;
+        const isKeepalive =
+          String(channel).endsWith(".ibkr-keepalive.telemetry") ||
+          payload?.__source === "ibkr-keepalive";
+        const isBridge =
+          String(channel).endsWith(".ibkr-bridge.telemetry") ||
+          payload?.__source === "ibkr-bridge";
 
-    fetchGwStatus();
-    const timer = window.setInterval(fetchGwStatus, 60000);
+        const nextKeepalive = isKeepalive ? payload : keepaliveRef.current;
+        const nextSsodh = isBridge ? payload : ssodhRef.current;
+
+        if (isKeepalive) {
+          setKeepaliveTelemetry(payload);
+          keepaliveRef.current = payload;
+          setGwLastSource("ibkr-keepalive");
+        }
+        if (isBridge) {
+          setSsodhTelemetry(payload);
+          ssodhRef.current = payload;
+          setGwLastSource("ibkr-bridge");
+        }
+
+        const status = computeGwStatus(nextKeepalive, nextSsodh, gwStatus);
+        setGwStatus(typeof status === "string" && status ? status : "UNKNOWN");
+        setGwInfo({
+          keepalive: nextKeepalive,
+          ssodhInit: nextSsodh,
+        });
+      },
+    });
     return () => {
-      isActive = false;
-      window.clearInterval(timer);
+      unsubscribe();
     };
   }, []);
 
@@ -472,7 +497,9 @@ export function MainLayout({
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <div className="text-base font-semibold text-slate-900">IBKR status</div>
-                <div className="text-[11px] text-slate-500">/ibkr-keepalive/status/info</div>
+                <div className="text-[11px] text-slate-500">
+                  DEV.ibkr-keepalive.telemetry + DEV.ibkr-bridge.telemetry
+                </div>
               </div>
             </div>
             <div className="max-h-[70vh] space-y-4 overflow-y-auto px-4 py-4 text-xs text-slate-700">
@@ -481,15 +508,38 @@ export function MainLayout({
                 <span className="font-semibold">gwStatus</span>
                 <span>{gwStatus}</span>
               </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
+                <div className="font-semibold text-slate-700">Significato stati</div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <div>
+                    <span className="font-semibold">GW_UP</span>: gateway OK (keepalive), bridge non confermato
+                  </div>
+                  <div>
+                    <span className="font-semibold">GW_NO_AUTH</span>: gateway OK, iServer non autenticato
+                  </div>
+                  <div>
+                    <span className="font-semibold">GW_DOWN</span>: gateway non raggiungibile
+                  </div>
+                  <div>
+                    <span className="font-semibold">GW_UP_BUT_ERROR</span>: gateway OK ma errore iServer/ssodh
+                  </div>
+                  <div>
+                    <span className="font-semibold">GW_BRIDGE_OK</span>: iServer autenticato e ssodh init ok
+                  </div>
+                </div>
+              </div>
               <div className="grid gap-3 md:grid-cols-2">
                 {(() => {
                   const keepalive = (gwInfo?.keepalive as Record<string, unknown>) || {};
+                  const ssodh = (gwInfo?.ssodhInit as Record<string, unknown>) || {};
                   const rows: Array<{ label: string; value: unknown }> = [
-                    { label: "serviceStatus", value: gwInfo?.STATUS },
-                    { label: "serviceDetails", value: gwInfo?.STATUS_DETAILS },
                     { label: "lastAuthStatus", value: keepalive.lastAuthStatus },
                     { label: "lastTickleStatus", value: keepalive.lastTickleStatus },
                     { label: "lastTickleAt", value: keepalive.lastTickleAt },
+                    { label: "ssodhAuth", value: ssodh?.ssodhInit?.authStatus?.data?.authenticated },
+                    { label: "ssodhPassed", value: ssodh?.ssodhInit?.ssodhInit?.data?.passed },
+                    { label: "lastSsodhInitAt", value: ssodh?.lastSsodhInitAt },
+                    { label: "lastSource", value: gwLastSource },
                   ];
 
                   return rows.map((row) => (
@@ -503,6 +553,28 @@ export function MainLayout({
                     </div>
                   ));
                 })()}
+              </div>
+              <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-500">
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  GW_BRIDGE_OK
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 status-indicator--blink" />
+                  GW_UP
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" />
+                  GW_NO_AUTH
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-red-500 status-indicator--blink" />
+                  GW_UP_BUT_ERROR
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-red-500" />
+                  GW_DOWN
+                </span>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">

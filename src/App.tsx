@@ -8,100 +8,14 @@ import ContactPage from "./components/pages/landing/Contact";
 import Logo from "./components/atoms/media/Logo";
 import LoginPage from "./components/pages/auth/LoginPage";
 import BaseButton from "./components/atoms/base/buttons/BaseButton";
-
-type RouteId =
-  | "landing"
-  | "maintenance"
-  | "contact"
-  | "login"
-  | "overview"
-  | "dashboard"
-  | "admin"
-  | "404";
-
-const normalizeHash = (hash: string): RouteId => {
-  const cleaned = (hash || "#/landing").replace(/^#\/?/, "");
-  const segment = cleaned.split(/[/?]/)[0] || "landing";
-  switch (segment) {
-    case "landing":
-      return "landing";
-    case "maintenance":
-      return "maintenance";
-    case "contact":
-      return "contact";
-    case "login":
-      return "login";
-    case "overview":
-      return "overview";
-    case "dashboard":
-      return "dashboard";
-    case "admin":
-      return "admin";
-    case "404":
-      return "404";
-    default:
-      return "404";
-  }
-};
-
-const getPermissionKeyFromHash = (hash: string): string => {
-  const cleaned = String(hash || "#/overview")
-    .replace(/^#\/?/, "")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-
-  const parts = cleaned.split(/[/?]/).filter(Boolean);
-  const base = parts[0] || "overview";
-
-  if (base === "overview") return "overview";
-
-  if (base === "dashboard") {
-    // /dashboard/tickers/TSLA -> dashboard/tickers
-    const section = parts[1];
-    if (section === "tickers") return "dashboard/tickers";
-    return "dashboard";
-  }
-
-  if (base === "admin") {
-    const section = parts[1];
-    if (section === "users") return "admin/users";
-    if (section === "scheduler") return "admin/scheduler";
-    if (section === "api_key") return "admin/api_key";
-    if (section === "microservice") return "admin/microservice";
-    return "admin";
-  }
-
-  return base;
-};
-
-const normalizeClientNavPage = (page: string): string => {
-  const trimmed = String(page || "").trim();
-  if (!trimmed) return "";
-
-  const cleaned = trimmed
-    .replace(/^#\/?/, "")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-
-  if (!cleaned) return "";
-
-  // Canonical pages (DB fixed)
-  if (cleaned === "overview") return "overview";
-  if (cleaned === "dashboard/*" || cleaned === "dashboard") return "dashboard/*";
-  if (cleaned === "dashboard/tickers") return "dashboard/tickers";
-  if (cleaned === "admin/*" || cleaned === "admin") return "admin/*";
-  if (cleaned === "admin/users") return "admin/users";
-  if (cleaned === "admin/scheduler") return "admin/scheduler";
-  if (cleaned === "admin/api_key") return "admin/api_key";
-  if (cleaned === "admin/microservice") return "admin/microservice";
-
-  // Small backward-compatible fallbacks
-  if (cleaned === "tickers") return "dashboard/tickers";
-  if (cleaned === "users") return "admin/users";
-  if (cleaned === "scheduler") return "admin/scheduler";
-
-  return cleaned;
-};
+import {
+  type RouteId,
+  getRouteId,
+  getPermissionKey,
+  normalizeClientNavPage,
+  navigate as hashNavigate,
+  getCurrentHash,
+} from "./utils/routing";
 
 const normalizeAllowedPages = (rawPages: string[]): string[] => {
   const normalized = rawPages
@@ -162,7 +76,7 @@ export default function App() {
   const showNav = !["landing", "login", "overview", "dashboard", "admin"].includes(route);
 
   const setHash = (id: RouteId) => {
-    window.location.hash = `/${id}`;
+    hashNavigate(id);
   };
 
   const redirectTo = useCallback((id: RouteId, fromHashChange = false) => {
@@ -235,8 +149,8 @@ export default function App() {
       setAuthChecking(true);
       try {
         const allowedPages = await ensureClientNavigation(token);
-        const requestedHash = typeof window !== "undefined" ? window.location.hash : "";
-        const permissionKey = normalizeClientNavPage(getPermissionKeyFromHash(requestedHash));
+        const requestedHash = getCurrentHash();
+        const permissionKey = normalizeClientNavPage(getPermissionKey(requestedHash));
 
         if (allowedPages.includes(permissionKey)) {
           redirectTo(target, fromHashChange);
@@ -270,7 +184,7 @@ export default function App() {
 
   useEffect(() => {
     const syncFromHash = () => {
-      const id = normalizeHash(window.location.hash);
+      const id = getRouteId(getCurrentHash());
       guardAndNavigate(id, true);
     };
     syncFromHash();

@@ -35,11 +35,11 @@ export default function RedisWsBridgeMicroservicePage({
   const [activeTab, setActiveTab] = useState<"general" | "websocket">("general");
 
   // State per WebSocket Bridge
-  const [wsBridgeClients, setWsBridgeClients] = useState<any>(null);
-  const [wsBridgeMetrics, setWsBridgeMetrics] = useState<any>(null);
-  const [wsBridgeBus, setWsBridgeBus] = useState<any>(null);
-  const [wsBridgeStatus, setWsBridgeStatus] = useState<Status>("idle");
-  const [wsBridgeError, setWsBridgeError] = useState<string | null>(null);
+  const [wsBridgeClients] = useState<any>(null);
+  const [wsBridgeMetrics] = useState<any>(null);
+  const [wsBridgeBus] = useState<any>(null);
+  const [wsBridgeStatus] = useState<Status>("idle");
+  const [wsBridgeError] = useState<string | null>(null);
   const [wsBridgeChannels, setWsBridgeChannels] = useState<Record<string, boolean>>({
     telemetry: true,
     metrics: true,

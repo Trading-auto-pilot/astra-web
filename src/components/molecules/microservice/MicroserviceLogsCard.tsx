@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import BaseButton from "../../atoms/base/buttons/BaseButton";
 import AppIcon from "../../atoms/icon/AppIcon";
 import { redisWsBridgeClient } from "../../../services/ws/redisWsBridgeClient";
@@ -20,6 +20,8 @@ type LogRow = {
 type Props = {
   microservice?: string | null;
   limit?: number;
+  fillHeight?: boolean;
+  className?: string;
 };
 
 const getToken = () => {
@@ -50,7 +52,30 @@ const levelColor: Record<string, string> = {
   error: "text-red-700 bg-red-50 border-red-200", // red
 };
 
-export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props) {
+const levelOrder = ["error", "warning", "info", "log", "trace"] as const;
+type LevelKey = (typeof levelOrder)[number];
+
+const normalizeLevel = (value?: string): LevelKey => {
+  const raw = String(value || "log").toLowerCase();
+  if (raw === "warn") return "warning";
+  if (raw === "debug") return "trace";
+  if (levelOrder.includes(raw as LevelKey)) return raw as LevelKey;
+  return "log";
+};
+
+const getLevelRank = (value?: string) => {
+  const normalized = normalizeLevel(value);
+  return levelOrder.indexOf(normalized);
+};
+
+export default function MicroserviceLogsCard({
+  microservice,
+  limit = 15,
+  fillHeight = false,
+  className = "",
+}: Props) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [maxHeight, setMaxHeight] = useState<number | null>(null);
   const [rows, setRows] = useState<LogRow[]>([]);
   const [liveRows, setLiveRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,14 +85,14 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
   const [hasMore, setHasMore] = useState(false);
   const [pageSize, setPageSize] = useState<number>(limit || 15);
   const [onlyThisService, setOnlyThisService] = useState(false);
+  const [levelFilter, setLevelFilter] = useState<LevelKey>("log");
   const token = useMemo(() => getToken(), []);
-
-  const getTopics = () => {
-    const base = "DEV";
-    if (!onlyThisService) return `${base}.*`;
-    const ms = microservice ? String(microservice).trim() : "";
-    return ms ? `${base}.${ms}.*` : `${base}.*`;
-  };
+  const storageKey = useMemo(
+    () => `astraai:logs:level:${microservice ? String(microservice).toLowerCase() : "all"}`,
+    [microservice]
+  );
+  const [isExpanded, setIsExpanded] = useState(false);
+  const modalRef = useRef<HTMLDivElement | null>(null);
 
   const normalizeMessage = (payload: any): LogRow | null => {
     if (!payload || typeof payload !== "object") return null;
@@ -115,6 +140,54 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
       __live: true,
     };
   };
+
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    const stored = localStorage.getItem(storageKey);
+    if (stored && levelOrder.includes(stored as LevelKey)) {
+      setLevelFilter(stored as LevelKey);
+    } else {
+      setLevelFilter("log");
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(storageKey, levelFilter);
+  }, [storageKey, levelFilter]);
+
+  useEffect(() => {
+    if (!fillHeight) return;
+    if (typeof window === "undefined") return;
+    const bottomOffset = 56;
+    let rafId = 0;
+    const computeHeight = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+      const next = Math.max(220, viewportHeight - rect.top - bottomOffset);
+      setMaxHeight(next);
+    };
+    const schedule = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(computeHeight);
+    };
+    computeHeight();
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, true);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
+    };
+  }, [fillHeight]);
+
+  useEffect(() => {
+    if (!isExpanded) return;
+    if (!modalRef.current) return;
+    modalRef.current.focus();
+  }, [isExpanded]);
 
   const fetchLogs = async (pageIndex = 0, sizeArg?: number) => {
     setLoading(true);
@@ -209,55 +282,22 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
     };
   }, [microservice, onlyThisService]);
 
+  const filteredRows = useMemo(() => {
+    const threshold = getLevelRank(levelFilter);
+    const combined = [...liveRows, ...rows];
+    return combined.filter((row) => getLevelRank(row.level) <= threshold);
+  }, [rows, liveRows, levelFilter]);
+
   const applyPageSize = (value: number) => {
     const next = Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), 1000) : 15;
     setPageSize(next);
     fetchLogs(0, next);
   };
 
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white/70 shadow-sm">
-      <div className="flex items-center justify-between px-3 py-2">
-        <div>
-          <div className="text-xs font-semibold text-slate-700">Logs</div>
-          <div className="text-[11px] text-slate-500">
-            {microservice ? `Microservice: ${microservice}` : "Ultimi log"}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
-            <input
-              type="checkbox"
-              className="peer sr-only"
-              checked={onlyThisService}
-              onChange={(e) => setOnlyThisService(e.target.checked)}
-              disabled={loading}
-            />
-            <span
-              className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                onlyThisService ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
-              } ${loading ? "opacity-70" : ""}`}
-            >
-              <span
-                className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                  onlyThisService ? "translate-x-4" : "translate-x-0.5"
-                }`}
-              />
-            </span>
-            <span className="text-[11px] font-semibold text-slate-700">Mostra solo questo servizio</span>
-          </label>
-          <BaseButton
-            variant="outline"
-            color="neutral"
-            size="sm"
-            startIcon={<AppIcon icon="mdi:refresh" />}
-            onClick={() => fetchLogs(page, pageSize)}
-            disabled={loading}
-          >
-            Aggiorna
-          </BaseButton>
-        </div>
-      </div>
+  const bodyClass = fillHeight ? "flex-1 min-h-0" : "max-h-64";
+
+  const renderLogsTable = () => (
+    <>
       {error && (
         <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
           {error}
@@ -268,8 +308,8 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
           {wsError}
         </div>
       )}
-      <div className="overflow-x-auto">
-        <div className="max-h-64 overflow-y-auto">
+      <div className="flex flex-1 flex-col overflow-x-auto">
+        <div className={`${bodyClass} overflow-y-auto`}>
           <table className="min-w-full table-fixed divide-y divide-slate-200 text-[11px] text-slate-700">
             <colgroup>
               <col style={{ width: "5.5rem" }} />
@@ -299,7 +339,7 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
                   </td>
                 </tr>
               )}
-              {!loading && rows.length + liveRows.length === 0 && (
+              {!loading && filteredRows.length === 0 && (
                 <tr>
                   <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={7}>
                     Nessun log disponibile
@@ -307,7 +347,7 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
                 </tr>
               )}
               {!loading &&
-                [...liveRows, ...rows].map((row, idx) => {
+                filteredRows.map((row, idx) => {
                   const lvl = String(row.level || "").toLowerCase();
                   const pill = levelColor[lvl] || levelColor.log;
                   const isOwnService =
@@ -398,6 +438,117 @@ export default function MicroserviceLogsCard({ microservice, limit = 15 }: Props
           </div>
         </div>
       </div>
+    </>
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      className={`flex min-h-0 flex-col rounded-lg border border-slate-200 bg-white/70 shadow-sm ${className}`}
+      style={fillHeight && maxHeight ? { height: `${maxHeight}px` } : undefined}
+    >
+      <div className="flex items-center justify-between px-3 py-2">
+        <div>
+          <div className="text-xs font-semibold text-slate-700">Logs</div>
+          <div className="text-[11px] text-slate-500">
+            {microservice ? `Microservice: ${microservice}` : "Ultimi log"}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-600">Livello</span>
+            <div className="flex w-56 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+              {levelOrder.map((lvl, idx) => {
+                const isActive = levelFilter === lvl;
+                const isFilled = idx <= getLevelRank(levelFilter);
+                return (
+                  <button
+                    key={lvl}
+                    type="button"
+                    className={`flex-1 border-r border-slate-200 px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition last:border-r-0 ${
+                      isFilled ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-500"
+                    } ${isActive ? "ring-1 ring-inset ring-slate-900" : ""}`}
+                    onClick={() => setLevelFilter(lvl)}
+                    disabled={loading}
+                  >
+                    {lvl}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
+            <input
+              type="checkbox"
+              className="peer sr-only"
+              checked={onlyThisService}
+              onChange={(e) => setOnlyThisService(e.target.checked)}
+              disabled={loading}
+            />
+            <span
+              className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
+                onlyThisService ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
+              } ${loading ? "opacity-70" : ""}`}
+            >
+              <span
+                className={`h-4 w-4 rounded-full bg-white shadow transition ${
+                  onlyThisService ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </span>
+            <span className="text-[11px] font-semibold text-slate-700">Mostra solo questo servizio</span>
+          </label>
+          <BaseButton
+            variant="outline"
+            color="neutral"
+            size="sm"
+            startIcon={<AppIcon icon="mdi:refresh" />}
+            onClick={() => fetchLogs(page, pageSize)}
+            disabled={loading}
+          >
+            Aggiorna
+          </BaseButton>
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+            onClick={() => setIsExpanded(true)}
+            title="Espandi"
+          >
+            <AppIcon icon="mdi:arrow-expand" />
+          </button>
+        </div>
+      </div>
+      {renderLogsTable()}
+
+      {isExpanded && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
+          <div
+            ref={modalRef}
+            tabIndex={-1}
+            className="flex h-full w-full flex-col rounded-xl border border-slate-200 bg-white shadow-xl outline-none"
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <div className="text-base font-semibold text-slate-900">Logs</div>
+                <div className="text-xs text-slate-500">
+                  {microservice ? `Microservice: ${microservice}` : "Ultimi log"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                onClick={() => setIsExpanded(false)}
+                title="Comprimi"
+              >
+                <AppIcon icon="mdi:arrow-collapse" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {renderLogsTable()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

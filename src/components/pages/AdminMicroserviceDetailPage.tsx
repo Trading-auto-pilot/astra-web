@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import SectionHeader from "../molecules/content/SectionHeader";
 import AppIcon from "../atoms/icon/AppIcon";
+import { useMicroserviceSlug } from "../../hooks/useHashRouter";
 
 // Import dedicated microservice components
 import AlertingServiceMicroservicePage from "./microservices/AlertingServiceMicroservicePage";
@@ -19,20 +20,6 @@ type ReleaseInfo = {
   lastUpdate?: string | null;
   microservice?: string | null;
   note?: string[] | null;
-};
-
-const getSlugFromHash = (): string | null => {
-  if (typeof window === "undefined") return null;
-  const cleaned = window.location.hash.replace(/^#\/?/, "");
-  const parts = cleaned.split("/").filter(Boolean);
-  if (parts[0] === "admin" && parts[1] === "microservice" && parts[2]) {
-    try {
-      return decodeURIComponent(parts[2]);
-    } catch {
-      return parts[2];
-    }
-  }
-  return null;
 };
 
 const formatDateTime = (value?: string | null) => {
@@ -54,17 +41,8 @@ export default function AdminMicroserviceDetailPage() {
   const [health, setHealth] = useState<Record<string, any> | null>(null);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
 
-  // Get microservice slug from URL hash - use state to react to hash changes
-  const [slug, setSlug] = useState<string | null>(() => getSlugFromHash());
-
-  // Listen for hash changes to update slug
-  useEffect(() => {
-    const handleHashChange = () => {
-      setSlug(getSlugFromHash());
-    };
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
+  // Get microservice slug from URL hash - hook handles hashchange automatically
+  const slug = useMicroserviceSlug();
 
   // Normalize slug for comparison
   const normalizedSlug = slug?.toLowerCase();
