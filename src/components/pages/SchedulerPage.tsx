@@ -7,8 +7,14 @@ import {
   createSchedulerJob,
   reloadSchedulerJobs,
   updateSchedulerJob,
+  runSchedulerJob,
+  fetchSchedulerJobLastRun,
   type SchedulerJob,
+  type SchedulerLastRun,
 } from "../../api/scheduler";
+import { redisWsBridgeClient } from "../../services/ws/redisWsBridgeClient";
+import { resolveText } from "../../utils/textResolver";
+import TextResolverHelpModal from "../molecules/content/TextResolverHelpModal";
 
 type Status = "idle" | "loading" | "error";
 type RuleDraft = {
@@ -185,10 +191,23 @@ export function SchedulerPage() {
   const [editingRules, setEditingRules] = useState<RuleDraft[]>([]);
   const [headersText, setHeadersText] = useState("");
   const [bodyText, setBodyText] = useState("");
+  const [resolveEnabled, setResolveEnabled] = useState(false);
+  const [showResolverHelp, setShowResolverHelp] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showRunModal, setShowRunModal] = useState(false);
+  const [selectedRunJobKey, setSelectedRunJobKey] = useState<string | null>(null);
+  const [lastRunData, setLastRunData] = useState<SchedulerLastRun | null>(null);
+  const [lastRunLoading, setLastRunLoading] = useState(false);
+  const [showRunNowModal, setShowRunNowModal] = useState(false);
+  const [runNowJob, setRunNowJob] = useState<SchedulerJob | null>(null);
+  const [runNowHeadersText, setRunNowHeadersText] = useState("{}");
+  const [runNowBodyText, setRunNowBodyText] = useState("");
+  const [runNowStatus, setRunNowStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [runNowError, setRunNowError] = useState<string | null>(null);
+  const [runNowResolveEnabled, setRunNowResolveEnabled] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -206,6 +225,28 @@ export function SchedulerPage() {
       });
 
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    redisWsBridgeClient.start();
+    const unsubscribe = redisWsBridgeClient.subscribe({
+      filter: (msg) => {
+        if (!msg || typeof msg !== "object") return false;
+        if (msg.type !== "momentumRefresh") return false;
+        const channel = typeof msg.__channel === "string" ? msg.__channel : "";
+        if (channel && !channel.includes(".tickerscanner.telemetry")) return false;
+        return typeof msg.jobKey === "string" && msg.jobKey.trim().length > 0;
+      },
+      onMessage: (payload) => {
+        const jobKey = String(payload.jobKey || "").trim();
+        if (!jobKey) return;
+        setLastRunsByJobKey((prev) => ({ ...prev, [jobKey]: payload }));
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const rows = useMemo(() => jobs, [jobs]);
@@ -318,7 +359,7 @@ export function SchedulerPage() {
     try {
       body = bodyText.trim() ? JSON.parse(bodyText) : null;
     } catch {
-      setSaveError("Body non e un JSON valido.");
+      setSaveError("Body non e un JSON valido. I placeholder vanno tra virgolette, es: \"[[yesterday]]\".");
       setSaving(false);
       return;
     }
@@ -392,6 +433,66 @@ export function SchedulerPage() {
       setDeleteError(err?.message || "Errore durante la cancellazione");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const openRunNowModal = (job: SchedulerJob) => {
+    setRunNowJob(job);
+    setRunNowHeadersText(JSON.stringify(job.headers ?? {}, null, 2));
+    setRunNowBodyText(
+      job.body === null || job.body === undefined
+        ? ""
+        : typeof job.body === "string"
+          ? job.body
+          : JSON.stringify(job.body, null, 2)
+    );
+    setRunNowStatus("idle");
+    setRunNowError(null);
+    setShowRunNowModal(true);
+  };
+
+  const closeRunNowModal = () => {
+    setShowRunNowModal(false);
+    setRunNowJob(null);
+    setRunNowStatus("idle");
+    setRunNowError(null);
+  };
+
+  const handleRunNow = async () => {
+    if (!runNowJob?.jobKey) return;
+    setRunNowStatus("loading");
+    setRunNowError(null);
+
+    let headersOverride: Record<string, unknown> | undefined;
+    let bodyOverride: unknown | undefined;
+
+    try {
+      headersOverride = runNowHeadersText.trim() ? JSON.parse(runNowHeadersText) : undefined;
+    } catch {
+      setRunNowError("Headers non sono un JSON valido. I placeholder vanno tra virgolette, es: \"[[yesterday]]\".");
+      setRunNowStatus("error");
+      return;
+    }
+
+    try {
+      bodyOverride = runNowBodyText.trim() ? JSON.parse(runNowBodyText) : undefined;
+    } catch {
+      setRunNowError("Body non e un JSON valido. I placeholder vanno tra virgolette, es: \"[[yesterday]]\".");
+      setRunNowStatus("error");
+      return;
+    }
+
+    const overrides: { headers?: Record<string, unknown>; body?: unknown } = {};
+    if (headersOverride) overrides.headers = headersOverride;
+    if (bodyOverride !== undefined) overrides.body = bodyOverride;
+
+    try {
+      await runSchedulerJob(runNowJob.jobKey, Object.keys(overrides).length ? overrides : undefined);
+      setRunNowStatus("success");
+      setTimeout(() => closeRunNowModal(), 1500);
+    } catch (err: any) {
+      setRunNowError(err?.message || "Errore durante l'avvio del job");
+      setRunNowStatus("error");
     }
   };
 
@@ -610,13 +711,32 @@ export function SchedulerPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">
-              URL
+              <span className="flex items-center gap-2">
+                URL
+                <button
+                  type="button"
+                  onClick={() => setResolveEnabled((v) => !v)}
+                  className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-[10px] font-bold transition ${
+                    resolveEnabled
+                      ? "border-blue-500 bg-blue-500 text-white"
+                      : "border-slate-300 bg-white text-slate-400"
+                  }`}
+                  title="Anteprima placeholder risolti"
+                >
+                  f
+                </button>
+              </span>
               <input
                 type="text"
                 value={createDraft.url ?? ""}
                 onChange={(e) => updateCreateField("url", e.target.value)}
                 className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
               />
+              {resolveEnabled && createDraft.url?.includes("[[") && (
+                <div className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] text-blue-700">
+                  <span className="font-semibold">Preview:</span> {resolveText(createDraft.url || "")}
+                </div>
+              )}
             </label>
             <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
               <input
@@ -896,6 +1016,22 @@ export function SchedulerPage() {
                         className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-800"
                         aria-label="Log di esecuzione"
                         title="Log di esecuzione"
+                        onClick={async () => {
+                          const jobKey = String(job.jobKey || "").trim();
+                          if (!jobKey) return;
+                          setSelectedRunJobKey(jobKey);
+                          setLastRunData(null);
+                          setLastRunLoading(true);
+                          setShowRunModal(true);
+                          try {
+                            const data = await fetchSchedulerJobLastRun(jobKey);
+                            setLastRunData(data);
+                          } catch {
+                            setLastRunData(null);
+                          } finally {
+                            setLastRunLoading(false);
+                          }
+                        }}
                       >
                         <AppIcon icon="mdi:clipboard-text-outline" className="h-4 w-4" />
                       </button>
@@ -904,6 +1040,7 @@ export function SchedulerPage() {
                         className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-emerald-700 shadow-sm transition hover:border-slate-300 hover:text-emerald-800"
                         aria-label="Run now"
                         title="Run now"
+                        onClick={() => openRunNowModal(job)}
                       >
                         <AppIcon icon="mdi:play" className="h-4 w-4" />
                       </button>
@@ -1018,13 +1155,32 @@ export function SchedulerPage() {
               Market aware (skip se exchange chiuso)
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">
-              URL
+              <span className="flex items-center gap-2">
+                URL
+                <button
+                  type="button"
+                  onClick={() => setResolveEnabled((v) => !v)}
+                  className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-[10px] font-bold transition ${
+                    resolveEnabled
+                      ? "border-blue-500 bg-blue-500 text-white"
+                      : "border-slate-300 bg-white text-slate-400"
+                  }`}
+                  title="Anteprima placeholder risolti"
+                >
+                  f
+                </button>
+              </span>
               <input
                 type="text"
                 value={editingDraft.url ?? ""}
                 onChange={(e) => updateDraftField("url", e.target.value)}
                 className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
               />
+              {resolveEnabled && editingDraft.url?.includes("[[") && (
+                <div className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] text-blue-700">
+                  <span className="font-semibold">Preview:</span> {resolveText(editingDraft.url || "")}
+                </div>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Timeout (ms)
@@ -1086,6 +1242,31 @@ export function SchedulerPage() {
                 className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
               />
             </label>
+            <div className="flex items-center gap-2 md:col-span-2">
+              <button
+                type="button"
+                onClick={() => setResolveEnabled((v) => !v)}
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold transition ${
+                  resolveEnabled
+                    ? "border-blue-500 bg-blue-500 text-white"
+                    : "border-slate-300 bg-white text-slate-400"
+                }`}
+                title="Anteprima placeholder risolti"
+              >
+                f
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowResolverHelp(true)}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-400 transition hover:border-slate-400 hover:text-slate-600"
+                title="Guida placeholder"
+              >
+                <AppIcon icon="mdi:information-outline" className="h-4 w-4" />
+              </button>
+              <span className="text-[11px] text-slate-500">
+                Anteprima placeholder <code className="rounded bg-slate-100 px-1">{"[[today]]"}</code> — i placeholder vengono risolti a runtime dal backend
+              </span>
+            </div>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">
               Headers (JSON)
               <textarea
@@ -1093,6 +1274,11 @@ export function SchedulerPage() {
                 onChange={(e) => setHeadersText(e.target.value)}
                 className="min-h-[70px] rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
               />
+              {resolveEnabled && headersText.includes("[[") && (
+                <pre className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] text-blue-700 whitespace-pre-wrap">
+                  <span className="font-semibold">Preview:</span>{"\n"}{resolveText(headersText)}
+                </pre>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">
               Body (JSON)
@@ -1101,6 +1287,11 @@ export function SchedulerPage() {
                 onChange={(e) => setBodyText(e.target.value)}
                 className="min-h-[70px] rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
               />
+              {resolveEnabled && bodyText.includes("[[") && (
+                <pre className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] text-blue-700 whitespace-pre-wrap">
+                  <span className="font-semibold">Preview:</span>{"\n"}{resolveText(bodyText)}
+                </pre>
+              )}
             </label>
             <div className="text-xs font-semibold text-slate-600 md:col-span-2">
               Rules
@@ -1217,6 +1408,179 @@ export function SchedulerPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {showRunModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold text-slate-900">Ultima esecuzione</div>
+                <div className="text-xs text-slate-500">
+                  {selectedRunJobKey ? `Job key: ${selectedRunJobKey}` : "Job key non disponibile"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-sm font-semibold text-slate-600 hover:text-slate-800"
+                onClick={() => {
+                  setShowRunModal(false);
+                  setSelectedRunJobKey(null);
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              {lastRunLoading ? (
+                <div className="text-slate-500">Caricamento...</div>
+              ) : lastRunData ? (
+                <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap">
+                  {JSON.stringify(lastRunData, null, 2)}
+                </pre>
+              ) : (
+                <div className="text-slate-500">Nessun dato trovato su Redis per questo job.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRunNowModal && runNowJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold text-slate-900">Esecuzione manuale</div>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  Stai per avviare manualmente questo task. L'esecuzione avverra come se fosse schedulata.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-sm font-semibold text-slate-400 hover:text-slate-600"
+                onClick={closeRunNowModal}
+              >
+                <AppIcon icon="mdi:close" className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <div>
+                  <span className="font-semibold text-slate-500">Job key</span>
+                  <div className="text-slate-800">{runNowJob.jobKey ?? "-"}</div>
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-500">Metodo</span>
+                  <div className="text-slate-800">{runNowJob.method ?? "GET"}</div>
+                </div>
+                <div className="col-span-2 mt-1">
+                  <span className="font-semibold text-slate-500">URL</span>
+                  <div className="truncate text-slate-800">{runNowJob.url ?? "-"}</div>
+                </div>
+                <div className="col-span-2 mt-1">
+                  <span className="font-semibold text-slate-500">Descrizione</span>
+                  <div className="text-slate-800">{runNowJob.description || "-"}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRunNowResolveEnabled((v) => !v)}
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold transition ${
+                    runNowResolveEnabled
+                      ? "border-blue-500 bg-blue-500 text-white"
+                      : "border-slate-300 bg-white text-slate-400"
+                  }`}
+                  title="Anteprima placeholder risolti"
+                >
+                  f
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowResolverHelp(true)}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-400 transition hover:border-slate-400 hover:text-slate-600"
+                  title="Guida placeholder"
+                >
+                  <AppIcon icon="mdi:information-outline" className="h-4 w-4" />
+                </button>
+                <span className="text-[11px] text-slate-500">
+                  Anteprima placeholder — risolti a runtime dal backend
+                </span>
+              </div>
+              {runNowResolveEnabled && runNowJob?.url?.includes("[[") && (
+                <div className="rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] text-blue-700">
+                  <span className="font-semibold">URL preview:</span> {resolveText(runNowJob.url || "")}
+                </div>
+              )}
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                Headers override (JSON)
+                <textarea
+                  value={runNowHeadersText}
+                  onChange={(e) => setRunNowHeadersText(e.target.value)}
+                  className="min-h-[60px] rounded-md border border-slate-200 bg-white px-2 py-1 font-mono text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+                />
+                {runNowResolveEnabled && runNowHeadersText.includes("[[") && (
+                  <pre className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] text-blue-700 whitespace-pre-wrap">
+                    <span className="font-semibold">Preview:</span>{"\n"}{resolveText(runNowHeadersText)}
+                  </pre>
+                )}
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                Body override (JSON)
+                <textarea
+                  value={runNowBodyText}
+                  onChange={(e) => setRunNowBodyText(e.target.value)}
+                  className="min-h-[60px] rounded-md border border-slate-200 bg-white px-2 py-1 font-mono text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+                />
+                {runNowResolveEnabled && runNowBodyText.includes("[[") && (
+                  <pre className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] text-blue-700 whitespace-pre-wrap">
+                    <span className="font-semibold">Preview:</span>{"\n"}{resolveText(runNowBodyText)}
+                  </pre>
+                )}
+              </label>
+            </div>
+
+            {runNowError && (
+              <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {runNowError}
+              </div>
+            )}
+
+            {runNowStatus === "success" && (
+              <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                Job avviato con successo
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+                onClick={closeRunNowModal}
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+                onClick={handleRunNow}
+                disabled={runNowStatus === "loading" || runNowStatus === "success"}
+              >
+                <AppIcon icon="mdi:play" className="h-4 w-4" />
+                {runNowStatus === "loading" ? "Avvio..." : "Avvia task"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showResolverHelp && (
+        <TextResolverHelpModal onClose={() => setShowResolverHelp(false)} />
       )}
     </div>
   );

@@ -282,7 +282,7 @@ export default function CachemanagerMicroservicePage({
   }, []);
 
   return (
-    <div>
+    <div className="flex flex-1 min-h-0 flex-col">
       {/* BARRA DEI TAB */}
       <div className="flex gap-6 border-b border-slate-200">
         {/* Tab General Settings */}
@@ -345,12 +345,14 @@ export default function CachemanagerMicroservicePage({
 
       {/* Tab General: Usa il componente condiviso con il layout speciale a 2 colonne per cachemanager */}
       {activeTab === "general" && (
-        <MicroserviceGeneralTab
-          microservice="cachemanager"
-          onReleaseChange={onReleaseChange}
-          onHealthChange={onHealthChange}
-          onOpenReleaseModal={onOpenReleaseModal}
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <MicroserviceGeneralTab
+            microservice="cachemanager"
+            onReleaseChange={onReleaseChange}
+            onHealthChange={onHealthChange}
+            onOpenReleaseModal={onOpenReleaseModal}
+          />
+        </div>
       )}
 
       {/* Tab Specific: Form per recuperare candles dai vari provider */}

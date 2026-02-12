@@ -5,6 +5,7 @@ import { useRelease } from "../hooks/useReleaseInfo";
 import BaseButton from "../components/atoms/base/buttons/BaseButton";
 import { fetchServiceFlags } from "../api/serviceFlags";
 import { redisWsBridgeClient } from "../services/ws/redisWsBridgeClient";
+import { env } from "../config/env";
 
 export type MainLayoutProps = {
   children: ReactNode;
@@ -129,45 +130,71 @@ export function MainLayout({
   const [microservices, setMicroservices] = useState<string[]>([]);
   const [microserviceMenuOpen, setMicroserviceMenuOpen] = useState(false);
   const [gwStatus, setGwStatus] = useState("UNKNOWN");
+  const [marketDataStatus, setMarketDataStatus] = useState("UNKNOWN");
   const [gwInfo, setGwInfo] = useState<Record<string, unknown> | null>(null);
-  const [keepaliveTelemetry, setKeepaliveTelemetry] = useState<Record<string, any> | null>(null);
-  const [ssodhTelemetry, setSsodhTelemetry] = useState<Record<string, any> | null>(null);
+  const [, setBridgeTelemetry] = useState<Record<string, any> | null>(null);
   const [gwLastSource, setGwLastSource] = useState<string | null>(null);
-  const keepaliveRef = useRef<Record<string, any> | null>(null);
-  const ssodhRef = useRef<Record<string, any> | null>(null);
+  const telemetryRef = useRef<Record<string, any> | null>(null);
   const [showGwModal, setShowGwModal] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedAccountType, setSelectedAccountType] = useState<string | null>(null);
 
   const statusIndicatorTone =
-    gwStatus === "GW_BRIDGE_OK"
+    gwStatus === "READY"
       ? "bg-emerald-500"
-      : gwStatus === "GW_UP"
-        ? "bg-emerald-500"
-        : gwStatus === "GW_NO_AUTH"
-          ? "bg-amber-400"
-          : gwStatus === "GW_UP_BUT_ERROR"
+      : gwStatus === "NEED_AUTH"
+        ? "bg-amber-400"
+        : gwStatus === "COMPETING"
+          ? "bg-orange-500"
+          : gwStatus === "DOWN"
             ? "bg-red-500"
-            : gwStatus === "GW_DOWN"
-              ? "bg-red-500"
-              : "bg-slate-400";
+            : "bg-slate-400";
   const statusIndicatorPulse =
-    gwStatus === "GW_UP" || gwStatus === "GW_UP_BUT_ERROR" ? "status-indicator--blink" : "";
+    gwStatus === "COMPETING" ? "status-indicator--blink" : "";
 
-  const computeGwStatus = (keepalive: any, ssodh: any, fallback?: string) => {
-    const authStatus = keepalive?.lastAuthStatus;
-    const tickleStatus = keepalive?.lastTickleStatus;
-    const status = typeof authStatus === "number" ? authStatus : tickleStatus;
-    if (status === 401) return "GW_NO_AUTH";
-    if (status === 200) {
-      const authOk = ssodh?.ssodhInit?.authStatus?.data?.authenticated;
-      const ssodhOk = ssodh?.ssodhInit?.ssodhInit?.data?.passed;
-      if (authOk && ssodhOk) return "GW_BRIDGE_OK";
-      if (ssodh?.ssodhInit) return "GW_UP_BUT_ERROR";
-      return "GW_UP";
+  const computeConnectionStatus = (telemetry: any, fallback?: string) => {
+    const authStatus = telemetry?.authStatus ?? null;
+    const tickle = telemetry?.tickle ?? null;
+    const ssodh = telemetry?.ssodhInit ?? null;
+
+    const authOk = authStatus?.status === 200 && !authStatus?.error;
+    const tickleOk = tickle?.status === 200 && !tickle?.error;
+    const ssodhAuthOk = ssodh?.authStatus?.status === 200 && !ssodh?.authStatus?.error;
+    const ssodhInitOk = ssodh?.ssodhInit?.status === 200 && !ssodh?.ssodhInit?.error;
+    const ssodhKo = !ssodhAuthOk || !ssodhInitOk;
+
+    if (!tickleOk && !tickle?.data?.session) return "DOWN";
+    if (!authOk && !tickleOk && ssodhKo) return "DOWN";
+
+    const a =
+      authStatus?.data ??
+      tickle?.data?.iserver?.authStatus ??
+      ssodh?.authStatus?.data ??
+      null;
+
+    // Se non troviamo authStatus ma le chiamate sono OK, considera comunque NEED_AUTH
+    if (!a && (authOk || tickleOk)) return "NEED_AUTH";
+
+    if (a?.authenticated === false || a?.connected === false) return "NEED_AUTH";
+    if (a?.competing === true) return "COMPETING";
+
+    if (
+      a?.authenticated === true &&
+      a?.connected === true &&
+      a?.competing === false &&
+      (authOk || tickleOk)
+    ) {
+      return "READY";
     }
-    if (typeof status === "number") return "GW_UP_BUT_ERROR";
-    return fallback || "GW_DOWN";
+
+    return fallback && fallback !== "UNKNOWN" ? fallback : "DOWN";
+  };
+
+  const computeMarketDataStatus = (telemetry: any) => {
+    const hmds = telemetry?.tickle?.data?.hmds;
+    if (hmds?.error) return "DOWN";
+    if (hmds?.authStatus?.connected === true) return "UP";
+    return "DOWN";
   };
 
   const closeNav = () => setOpenNav(false);
@@ -221,43 +248,26 @@ export function MainLayout({
       filter: (msg) => {
         const channel = msg?.__channel || msg?.channel;
         if (typeof channel === "string") {
-          return (
-            channel.endsWith(".ibkr-keepalive.telemetry") ||
-            channel.endsWith(".ibkr-bridge.telemetry")
-          );
+          return channel.endsWith(".ibkr-bridge.telemetry");
         }
-        return msg?.type === "keepalive";
+        return msg?.type === "telemetry";
       },
       onMessage: (msg) => {
         const channel = msg?.__channel || msg?.channel || "";
-        const payload = msg?.keepalive || msg?.payload || msg;
-        const isKeepalive =
-          String(channel).endsWith(".ibkr-keepalive.telemetry") ||
-          payload?.__source === "ibkr-keepalive";
+        const payload = msg?.payload || msg;
         const isBridge =
           String(channel).endsWith(".ibkr-bridge.telemetry") ||
           payload?.__source === "ibkr-bridge";
+        if (!isBridge) return;
 
-        const nextKeepalive = isKeepalive ? payload : keepaliveRef.current;
-        const nextSsodh = isBridge ? payload : ssodhRef.current;
+        setBridgeTelemetry(payload);
+        telemetryRef.current = payload;
+        setGwLastSource("ibkr-bridge");
 
-        if (isKeepalive) {
-          setKeepaliveTelemetry(payload);
-          keepaliveRef.current = payload;
-          setGwLastSource("ibkr-keepalive");
-        }
-        if (isBridge) {
-          setSsodhTelemetry(payload);
-          ssodhRef.current = payload;
-          setGwLastSource("ibkr-bridge");
-        }
-
-        const status = computeGwStatus(nextKeepalive, nextSsodh, gwStatus);
+        const status = computeConnectionStatus(payload, gwStatus);
         setGwStatus(typeof status === "string" && status ? status : "UNKNOWN");
-        setGwInfo({
-          keepalive: nextKeepalive,
-          ssodhInit: nextSsodh,
-        });
+        setMarketDataStatus(computeMarketDataStatus(payload));
+        setGwInfo(payload);
       },
     });
     return () => {
@@ -428,6 +438,20 @@ export function MainLayout({
                 <span>{gwStatus}</span>
               </span>
             </button>
+            <span className="inline-flex items-center gap-2 rounded px-2 py-1 text-[11px] text-slate-600">
+              Market data:
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold text-white ${
+                  marketDataStatus === "UP"
+                    ? "bg-emerald-500"
+                    : marketDataStatus === "DOWN"
+                      ? "bg-red-500"
+                      : "bg-slate-400"
+                }`}
+              >
+                {marketDataStatus}
+              </span>
+            </span>
             {selectedAccountId ? (
               <span className="inline-flex items-center gap-2 rounded px-2 py-1 text-[11px] text-slate-600">
                 Connesso al conto {selectedAccountId}
@@ -498,7 +522,7 @@ export function MainLayout({
               <div>
                 <div className="text-base font-semibold text-slate-900">IBKR status</div>
                 <div className="text-[11px] text-slate-500">
-                  DEV.ibkr-keepalive.telemetry + DEV.ibkr-bridge.telemetry
+                  {env.appEnv}.ibkr-bridge.telemetry
                 </div>
               </div>
             </div>
@@ -508,37 +532,57 @@ export function MainLayout({
                 <span className="font-semibold">gwStatus</span>
                 <span>{gwStatus}</span>
               </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`status-indicator h-2.5 w-2.5 rounded-full ${
+                    marketDataStatus === "UP"
+                      ? "bg-emerald-500"
+                      : marketDataStatus === "DOWN"
+                        ? "bg-red-500"
+                        : "bg-slate-400"
+                  }`}
+                />
+                <span className="font-semibold">marketData</span>
+                <span>{marketDataStatus}</span>
+              </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
                 <div className="font-semibold text-slate-700">Significato stati</div>
                 <div className="mt-2 grid gap-2 md:grid-cols-2">
                   <div>
-                    <span className="font-semibold">GW_UP</span>: gateway OK (keepalive), bridge non confermato
+                    <span className="font-semibold">READY</span>: brokerage operativo, sessione valida
                   </div>
                   <div>
-                    <span className="font-semibold">GW_NO_AUTH</span>: gateway OK, iServer non autenticato
+                    <span className="font-semibold">NEED_AUTH</span>: gateway OK, serve login
                   </div>
                   <div>
-                    <span className="font-semibold">GW_DOWN</span>: gateway non raggiungibile
+                    <span className="font-semibold">COMPETING</span>: sessione in concorrenza
                   </div>
                   <div>
-                    <span className="font-semibold">GW_UP_BUT_ERROR</span>: gateway OK ma errore iServer/ssodh
-                  </div>
-                  <div>
-                    <span className="font-semibold">GW_BRIDGE_OK</span>: iServer autenticato e ssodh init ok
+                    <span className="font-semibold">DOWN</span>: gateway non raggiungibile o health check KO
                   </div>
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 {(() => {
-                  const keepalive = (gwInfo?.keepalive as Record<string, unknown>) || {};
-                  const ssodh = (gwInfo?.ssodhInit as Record<string, unknown>) || {};
+                  const telemetry = (gwInfo as Record<string, any>) || {};
+                  const authStatus = telemetry?.authStatus || {};
+                  const tickle = telemetry?.tickle || {};
+                  const ssodh = telemetry?.ssodhInit || {};
+                  const unifiedAuth =
+                    authStatus?.data ??
+                    tickle?.data?.iserver?.authStatus ??
+                    ssodh?.authStatus?.data ??
+                    {};
                   const rows: Array<{ label: string; value: unknown }> = [
-                    { label: "lastAuthStatus", value: keepalive.lastAuthStatus },
-                    { label: "lastTickleStatus", value: keepalive.lastTickleStatus },
-                    { label: "lastTickleAt", value: keepalive.lastTickleAt },
-                    { label: "ssodhAuth", value: ssodh?.ssodhInit?.authStatus?.data?.authenticated },
-                    { label: "ssodhPassed", value: ssodh?.ssodhInit?.ssodhInit?.data?.passed },
-                    { label: "lastSsodhInitAt", value: ssodh?.lastSsodhInitAt },
+                    { label: "authStatus", value: authStatus.status },
+                    { label: "tickleStatus", value: tickle.status },
+                    { label: "tickleSession", value: tickle?.data?.session },
+                    { label: "authenticated", value: unifiedAuth?.authenticated },
+                    { label: "connected", value: unifiedAuth?.connected },
+                    { label: "competing", value: unifiedAuth?.competing },
+                    { label: "ssodhAuthOk", value: ssodh?.authStatus?.ok },
+                    { label: "ssodhInitOk", value: ssodh?.ssodhInit?.ok },
+                    { label: "lastSsodhInitAt", value: telemetry?.lastSsodhInitAt },
                     { label: "lastSource", value: gwLastSource },
                   ];
 
@@ -557,23 +601,19 @@ export function MainLayout({
               <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-500">
                 <span className="inline-flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                  GW_BRIDGE_OK
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 status-indicator--blink" />
-                  GW_UP
+                  READY
                 </span>
                 <span className="inline-flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-amber-400" />
-                  GW_NO_AUTH
+                  NEED_AUTH
                 </span>
                 <span className="inline-flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-red-500 status-indicator--blink" />
-                  GW_UP_BUT_ERROR
+                  <span className="h-2 w-2 rounded-full bg-orange-500 status-indicator--blink" />
+                  COMPETING
                 </span>
                 <span className="inline-flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-red-500" />
-                  GW_DOWN
+                  DOWN
                 </span>
               </div>
             </div>

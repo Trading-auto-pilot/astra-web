@@ -332,7 +332,7 @@ export default function MarketDataServiceMicroservicePage({
   );
 
   return (
-    <div>
+    <div className="flex flex-1 min-h-0 flex-col">
       <div className="flex gap-6 border-b border-slate-200">
         <button
           type="button"
@@ -355,12 +355,14 @@ export default function MarketDataServiceMicroservicePage({
       </div>
 
       {activeTab === "general" && (
-        <MicroserviceGeneralTab
-          microservice="market-data-service"
-          onReleaseChange={onReleaseChange}
-          onHealthChange={onHealthChange}
-          onOpenReleaseModal={onOpenReleaseModal}
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <MicroserviceGeneralTab
+            microservice="market-data-service"
+            onReleaseChange={onReleaseChange}
+            onHealthChange={onHealthChange}
+            onOpenReleaseModal={onOpenReleaseModal}
+          />
+        </div>
       )}
 
       {activeTab === "subscription" && (

@@ -33,7 +33,7 @@ export default function TickerScannerMicroservicePage({
   const [activeTab, setActiveTab] = useState<"general" | "specific">("general");
 
   return (
-    <div>
+    <div className="flex flex-1 min-h-0 flex-col">
       {/* BARRA DEI TAB */}
       <div className="flex gap-6 border-b border-slate-200">
         {/* Tab General Settings */}
@@ -63,12 +63,14 @@ export default function TickerScannerMicroservicePage({
 
       {/* Tab General: Usa il componente condiviso MicroserviceGeneralTab */}
       {activeTab === "general" && (
-        <MicroserviceGeneralTab
-          microservice="tickerscanner" // Nome del microservizio per costruire le URL API corrette
-          onReleaseChange={onReleaseChange} // Passa il callback al componente figlio
-          onHealthChange={onHealthChange} // Passa il callback al componente figlio
-          onOpenReleaseModal={onOpenReleaseModal} // Passa il callback al componente figlio
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <MicroserviceGeneralTab
+            microservice="tickerscanner"
+            onReleaseChange={onReleaseChange}
+            onHealthChange={onHealthChange}
+            onOpenReleaseModal={onOpenReleaseModal}
+          />
+        </div>
       )}
 
       {/* Tab Specific: Usa il componente esistente TickerScannerAdminPage */}

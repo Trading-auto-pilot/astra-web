@@ -14,9 +14,10 @@ dist-ssr
 
 # Environment files with secrets
 .env
-.env.development
-.env.staging
-.env.production
+.env.*
+*.pem
+*.key
+*.p12
 
 # Backup files
 *.backup

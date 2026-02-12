@@ -250,6 +250,7 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     );
   }
 
+
   if (section === "microservice") {
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
