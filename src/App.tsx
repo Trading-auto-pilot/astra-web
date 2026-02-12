@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCurrentAdmin } from "./api/auth";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardPage from "./components/pages/DashboardPage";
 import LandingPage from "./components/pages/landing/Homepage";
 import MaintenancePage from "./components/pages/landing/Maintenance";
@@ -12,65 +11,31 @@ import {
   type RouteId,
   getRouteId,
   getPermissionKey,
-  normalizeClientNavPage,
   navigate as hashNavigate,
   getCurrentHash,
 } from "./utils/routing";
-
-const normalizeAllowedPages = (rawPages: string[]): string[] => {
-  const normalized = rawPages
-    .map((p) => normalizeClientNavPage(p))
-    .filter(Boolean);
-
-  const expanded: string[] = [...normalized];
-
-  // Wildcard support: dashboard/* enables all dashboard pages.
-  if (normalized.includes("dashboard/*") || normalized.includes("dashboard")) {
-    if (!expanded.includes("dashboard/tickers")) expanded.push("dashboard/tickers");
-  }
-
-  if (normalized.includes("admin/*") || normalized.includes("admin")) {
-    if (!expanded.includes("admin/users")) expanded.push("admin/users");
-    if (!expanded.includes("admin/scheduler")) expanded.push("admin/scheduler");
-    if (!expanded.includes("admin/api_key")) expanded.push("admin/api_key");
-    if (!expanded.includes("admin/microservice")) expanded.push("admin/microservice");
-  }
-
-  // Always allow Overview as safe fallback.
-  if (!expanded.includes("overview")) {
-    expanded.unshift("overview");
-  }
-
-  return Array.from(new Set(expanded));
-};
+import {
+  AuthProvider,
+  useAuth,
+  normalizeClientNavPage,
+} from "./contexts/AuthContext";
 
 const PROTECTED_ROUTES = new Set<RouteId>(["overview", "dashboard", "admin"]);
-const NAV_CACHE_KEY = "astraai:auth:clientNavigation";
-const USERNAME_CACHE_KEY = "astraai:auth:username";
-const USERNAME_LOGIN_KEY = "astraai:login:username";
 
-export default function App() {
+function AppContent() {
+  const {
+    isLoading: authLoading,
+    navEntries,
+    user,
+    checkAuth,
+    logout,
+  } = useAuth();
+
   const [route, setRoute] = useState<RouteId>("landing");
   const [authChecking, setAuthChecking] = useState(false);
   const [pendingRoute, setPendingRoute] = useState<RouteId | null>(null);
-  const [navEntries, setNavEntries] = useState<any[]>(() => {
-    const token = localStorage.getItem("astraai:auth:token");
-    if (!token) return [];
-    const cached = localStorage.getItem(NAV_CACHE_KEY);
-    if (!cached) return [];
-    try {
-      const parsed = JSON.parse(cached);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
-  const [userName, setUserName] = useState<string | null>(() => {
-    return localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
-  });
 
-  const allowedPagesRef = useRef<string[] | null>(null);
-  const navTokenRef = useRef<string | null>(null);
+  const userName = user?.username ?? null;
 
   // Show the public top nav only on public pages.
   const showNav = !["landing", "login", "overview", "dashboard", "admin"].includes(route);
@@ -86,55 +51,6 @@ export default function App() {
     setRoute(id);
   }, []);
 
-  const ensureClientNavigation = useCallback(async (token?: string): Promise<string[]> => {
-    const storedToken = token ?? (localStorage.getItem("astraai:auth:token") || undefined);
-    const tokenMarker = storedToken ?? null;
-
-    if (allowedPagesRef.current && navTokenRef.current === tokenMarker) {
-      return allowedPagesRef.current;
-    }
-
-    const cachedName = localStorage.getItem(USERNAME_CACHE_KEY) || localStorage.getItem(USERNAME_LOGIN_KEY);
-    if (cachedName) {
-      setUserName((prev) => prev || cachedName);
-    }
-
-    const profile = await fetchCurrentAdmin(storedToken);
-    const entries = Array.isArray((profile as any).clientNavigation)
-      ? (profile as any).clientNavigation
-      : [];
-
-    const normalizedEntries = entries.map((entry: any) => ({
-      ...entry,
-      page: typeof entry?.page === "string" ? normalizeClientNavPage(entry.page) : entry?.page,
-    }));
-
-    setNavEntries(normalizedEntries);
-
-    const pages = normalizeAllowedPages(
-      entries
-        .map((entry: any) => entry?.page)
-        .filter((p: unknown): p is string => Boolean(p))
-    );
-
-    allowedPagesRef.current = pages;
-    navTokenRef.current = tokenMarker;
-
-    if (profile && typeof (profile as any).username === "string") {
-      setUserName((profile as any).username);
-      localStorage.setItem(USERNAME_CACHE_KEY, (profile as any).username);
-      localStorage.setItem(USERNAME_LOGIN_KEY, (profile as any).username);
-    }
-
-    try {
-      localStorage.setItem(NAV_CACHE_KEY, JSON.stringify(normalizedEntries));
-    } catch {
-      // ignore cache write errors
-    }
-
-    return pages;
-  }, []);
-
   const guardAndNavigate = useCallback(
     async (target: RouteId, fromHashChange = false) => {
       if (!PROTECTED_ROUTES.has(target)) {
@@ -144,21 +60,20 @@ export default function App() {
       }
 
       setPendingRoute(target);
-      const token = localStorage.getItem("astraai:auth:token") || undefined;
-
       setAuthChecking(true);
+
       try {
-        const allowedPages = await ensureClientNavigation(token);
+        const pages = await checkAuth();
         const requestedHash = getCurrentHash();
         const permissionKey = normalizeClientNavPage(getPermissionKey(requestedHash));
 
-        if (allowedPages.includes(permissionKey)) {
+        if (pages.includes(permissionKey)) {
           redirectTo(target, fromHashChange);
           return;
         }
 
         // Safe fallback: overview.
-        if (allowedPages.includes("overview")) {
+        if (pages.includes("overview")) {
           redirectTo("overview", false);
           return;
         }
@@ -166,20 +81,14 @@ export default function App() {
         redirectTo("404", fromHashChange);
       } catch (error) {
         console.error("Auth check failed", error);
-        if (token) {
-          localStorage.removeItem("astraai:auth:token");
-        }
-        localStorage.removeItem(NAV_CACHE_KEY);
-        localStorage.removeItem(USERNAME_CACHE_KEY);
-        allowedPagesRef.current = null;
-        navTokenRef.current = null;
+        logout();
         redirectTo("login", fromHashChange);
       } finally {
         setPendingRoute(null);
         setAuthChecking(false);
       }
     },
-    [ensureClientNavigation, redirectTo]
+    [checkAuth, logout, redirectTo]
   );
 
   useEffect(() => {
@@ -264,7 +173,7 @@ export default function App() {
       )}
 
       <div className={showNav ? "min-h-[calc(100vh-56px)] w-full" : "min-h-screen w-full"}>
-        {authChecking && pendingRoute ? (
+        {(authChecking || authLoading) && pendingRoute ? (
           <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-600">
             Verifica accesso in corso...
           </div>
@@ -273,5 +182,13 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

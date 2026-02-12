@@ -407,7 +407,7 @@ export default function AlertingServiceMicroservicePage({
   }, [emailTo, emailSubject, emailBody]);
 
   return (
-    <div>
+    <div className="flex flex-1 min-h-0 flex-col">
       {/* BARRA DEI TAB */}
       <div className="flex gap-6 border-b border-slate-200">
         {/* Tab General Settings */}
@@ -459,12 +459,14 @@ export default function AlertingServiceMicroservicePage({
 
       {/* Tab General: Usa il componente condiviso */}
       {activeTab === "general" && (
-        <MicroserviceGeneralTab
-          microservice="alertingservice"
-          onReleaseChange={onReleaseChange}
-          onHealthChange={onHealthChange}
-          onOpenReleaseModal={onOpenReleaseModal}
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <MicroserviceGeneralTab
+            microservice="alertingservice"
+            onReleaseChange={onReleaseChange}
+            onHealthChange={onHealthChange}
+            onOpenReleaseModal={onOpenReleaseModal}
+          />
+        </div>
       )}
 
       {/* Tab Message: Form per inviare messaggio WhatsApp di test */}

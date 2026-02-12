@@ -3,6 +3,7 @@ import BaseButton from "../../atoms/base/buttons/BaseButton";
 import AppIcon from "../../atoms/icon/AppIcon";
 import { redisWsBridgeClient } from "../../../services/ws/redisWsBridgeClient";
 import { env } from "../../../config/env";
+import { readStorage, readStorageJson, writeStorageJson } from "../../../utils/storage";
 
 type LogRow = {
   id?: number | string;
@@ -29,10 +30,36 @@ const getToken = () => {
   return localStorage.getItem("astraai:auth:token");
 };
 
-const formatDateTime = (value?: string) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+const toUtcDate = (value?: string) => {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw);
+  if (hasTz) return new Date(raw);
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const match = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/
+  );
+  if (match) {
+    const [, y, mo, d, h, mi, s, msRaw] = match;
+    const ms = msRaw ? Number(msRaw.padEnd(3, "0").slice(0, 3)) : 0;
+    const utcMs = Date.UTC(
+      Number(y),
+      Number(mo) - 1,
+      Number(d),
+      Number(h),
+      Number(mi),
+      Number(s),
+      ms
+    );
+    return new Date(utcMs);
+  }
+  return new Date(`${normalized}Z`);
+};
+
+const formatDateTime = (value?: string, timeZone: "UTC" | "Asia/Dubai" = "UTC") => {
+  const date = toUtcDate(value);
+  if (!date || Number.isNaN(date.getTime())) return value || "-";
   return date.toLocaleString("it-IT", {
     year: "numeric",
     month: "2-digit",
@@ -40,6 +67,7 @@ const formatDateTime = (value?: string) => {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    timeZone,
   });
 };
 
@@ -51,9 +79,32 @@ const levelColor: Record<string, string> = {
   warning: "text-amber-700 bg-amber-50 border-amber-200", // yellow
   error: "text-red-700 bg-red-50 border-red-200", // red
 };
+const levelSolid: Record<string, string> = {
+  error: "bg-red-500 text-white",
+  warning: "bg-amber-500 text-white",
+  info: "bg-emerald-500 text-white",
+  log: "bg-cyan-500 text-white",
+  trace: "bg-fuchsia-500 text-white",
+};
 
 const levelOrder = ["error", "warning", "info", "log", "trace"] as const;
 type LevelKey = (typeof levelOrder)[number];
+const serviceOptions = [
+  "all",
+  "alertingservice",
+  "authservice",
+  "cachemanager",
+  "decision-engine",
+  "dbmanager",
+  "ibkr-bridge",
+  "ibkr-keepalive",
+  "market-data-service",
+  "rediswsbridge",
+  "scheduler",
+  "servicecontrolplane",
+  "shared",
+  "tickerscanner",
+];
 
 const normalizeLevel = (value?: string): LevelKey => {
   const raw = String(value || "log").toLowerCase();
@@ -75,7 +126,6 @@ export default function MicroserviceLogsCard({
   className = "",
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [maxHeight, setMaxHeight] = useState<number | null>(null);
   const [rows, setRows] = useState<LogRow[]>([]);
   const [liveRows, setLiveRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -85,14 +135,54 @@ export default function MicroserviceLogsCard({
   const [hasMore, setHasMore] = useState(false);
   const [pageSize, setPageSize] = useState<number>(limit || 15);
   const [onlyThisService, setOnlyThisService] = useState(false);
+  const [selectedService, setSelectedService] = useState<string>("all");
+  const [selectedModule, setSelectedModule] = useState<string>("all");
+  const [selectedFunction, setSelectedFunction] = useState<string>("all");
+  const [dateStart, setDateStart] = useState<string>("");
+  const [dateEnd, setDateEnd] = useState<string>("");
+  const [dateStartDraft, setDateStartDraft] = useState<string>("");
+  const [dateEndDraft, setDateEndDraft] = useState<string>("");
+  const [messageQuery, setMessageQuery] = useState<string>("");
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [levelFilter, setLevelFilter] = useState<LevelKey>("log");
+  const [timeZone, setTimeZone] = useState<"UTC" | "Asia/Dubai">("UTC");
   const token = useMemo(() => getToken(), []);
   const storageKey = useMemo(
-    () => `astraai:logs:level:${microservice ? String(microservice).toLowerCase() : "all"}`,
+    () => `astraai:logs:filters:${microservice ? String(microservice).toLowerCase() : "all"}`,
     [microservice]
   );
   const [isExpanded, setIsExpanded] = useState(false);
   const modalRef = useRef<HTMLDivElement | null>(null);
+  const [jsonDetail, setJsonDetail] = useState<any | null>(null);
+
+  const openJsonDetail = (value: any) => {
+    setJsonDetail(value ?? null);
+  };
+
+  const closeJsonDetail = () => {
+    setJsonDetail(null);
+  };
+
+  const extractEmbeddedJson = (text: string): { message: string; json: any | null } => {
+    const trimmed = text.trimEnd();
+    const endCh = trimmed[trimmed.length - 1];
+    if (endCh === "}" || endCh === "]") {
+      const startCh = endCh === "}" ? "{" : "[";
+      let idx = trimmed.lastIndexOf(startCh);
+      let attempts = 0;
+      while (idx >= 0 && attempts < 5) {
+        try {
+          const candidate = trimmed.slice(idx);
+          const parsed = JSON.parse(candidate);
+          return { message: trimmed.slice(0, idx).trim(), json: parsed };
+        } catch {
+          idx = trimmed.lastIndexOf(startCh, idx - 1);
+          attempts++;
+        }
+      }
+    }
+    return { message: text, json: null };
+  };
 
   const normalizeMessage = (payload: any): LogRow | null => {
     if (!payload || typeof payload !== "object") return null;
@@ -114,7 +204,7 @@ export default function MicroserviceLogsCard({
     const channelModule = channelParts.length > 2 ? channelParts[2] : undefined;
     const entryService = payload?.microservice || channelService || microservice || "-";
     const entryModule = payload?.module || payload?.moduleName || channelModule || "-";
-    const entryMessage =
+    let entryMessage =
       typeof payload?.message === "string"
         ? payload.message
         : payload?.message
@@ -124,8 +214,24 @@ export default function MicroserviceLogsCard({
             : JSON.stringify(payload);
     const entryTimestamp = payload?.ts || payload?.timestamp || payload?.time;
 
-    if (onlyThisService && microservice) {
-      if (String(entryService).toLowerCase() !== String(microservice).toLowerCase()) return null;
+    // JSON extraction: usa details dal bus, altrimenti estrai dal messaggio
+    let jsonDetails: any = payload?.details ?? null;
+    if (jsonDetails === null || jsonDetails === undefined) {
+      const extracted = extractEmbeddedJson(entryMessage);
+      if (extracted.json !== null) {
+        entryMessage = extracted.message;
+        jsonDetails = extracted.json;
+      }
+    }
+
+    const effectiveService =
+      selectedService !== "all"
+        ? selectedService
+        : onlyThisService
+          ? microservice
+          : null;
+    if (effectiveService) {
+      if (String(entryService).toLowerCase() !== String(effectiveService).toLowerCase()) return null;
     }
 
     return {
@@ -136,52 +242,85 @@ export default function MicroserviceLogsCard({
       module: entryModule,
       functionName: payload?.functionName,
       message: entryMessage,
+      jsonDetails: jsonDetails !== null ? (typeof jsonDetails === "string" ? jsonDetails : JSON.stringify(jsonDetails)) : null,
       meta: payload,
       __live: true,
     };
   };
 
   useEffect(() => {
-    if (typeof localStorage === "undefined") return;
-    const stored = localStorage.getItem(storageKey);
-    if (stored && levelOrder.includes(stored as LevelKey)) {
-      setLevelFilter(stored as LevelKey);
+    const stored = readStorageJson<{
+      level?: string;
+      service?: string;
+      moduleName?: string;
+      functionName?: string;
+      dateStart?: string;
+      dateEnd?: string;
+      messageQuery?: string;
+    }>(storageKey, {});
+
+    let nextLevel: LevelKey = "log";
+    if (stored.level && levelOrder.includes(stored.level as LevelKey)) {
+      nextLevel = stored.level as LevelKey;
     } else {
-      setLevelFilter("log");
+      const legacyKey = `astraai:logs:level:${microservice ? String(microservice).toLowerCase() : "all"}`;
+      const legacy = readStorage(legacyKey);
+      if (legacy && levelOrder.includes(legacy as LevelKey)) {
+        nextLevel = legacy as LevelKey;
+      }
+    }
+
+    setLevelFilter(nextLevel);
+    if (stored.service && serviceOptions.includes(stored.service)) {
+      setSelectedService(stored.service);
+    } else {
+      setSelectedService("all");
+    }
+    if (stored.moduleName) {
+      setSelectedModule(stored.moduleName);
+    } else {
+      setSelectedModule("all");
+    }
+    if (stored.functionName) {
+      setSelectedFunction(stored.functionName);
+    } else {
+      setSelectedFunction("all");
+    }
+    if (stored.dateStart) {
+      setDateStart(stored.dateStart);
+      setDateStartDraft(stored.dateStart);
+    }
+    if (stored.dateEnd) {
+      setDateEnd(stored.dateEnd);
+      setDateEndDraft(stored.dateEnd);
+    }
+    if (stored.messageQuery) {
+      setMessageQuery(stored.messageQuery);
     }
   }, [storageKey]);
 
   useEffect(() => {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(storageKey, levelFilter);
-  }, [storageKey, levelFilter]);
+    writeStorageJson(storageKey, {
+      level: levelFilter,
+      service: selectedService,
+      moduleName: selectedModule,
+      functionName: selectedFunction,
+      dateStart,
+      dateEnd,
+      messageQuery,
+    });
+  }, [
+    storageKey,
+    levelFilter,
+    selectedService,
+    selectedFunction,
+    dateStart,
+    dateEnd,
+    messageQuery,
+    selectedModule,
+  ]);
 
-  useEffect(() => {
-    if (!fillHeight) return;
-    if (typeof window === "undefined") return;
-    const bottomOffset = 56;
-    let rafId = 0;
-    const computeHeight = () => {
-      const el = containerRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-      const next = Math.max(220, viewportHeight - rect.top - bottomOffset);
-      setMaxHeight(next);
-    };
-    const schedule = () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(computeHeight);
-    };
-    computeHeight();
-    window.addEventListener("resize", schedule);
-    window.addEventListener("scroll", schedule, true);
-    return () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", schedule);
-      window.removeEventListener("scroll", schedule, true);
-    };
-  }, [fillHeight]);
+  // No JavaScript height calculation needed - using CSS flex layout instead
 
   useEffect(() => {
     if (!isExpanded) return;
@@ -199,8 +338,25 @@ export default function MicroserviceLogsCard({
       if (safeSize) params.set("limit", String(safeSize));
       const offset = pageIndex * safeSize;
       if (offset > 0) params.set("offset", String(offset));
-      const msParam = microservice ? String(microservice).trim() : "";
-      if (onlyThisService && msParam) params.set("microservice", msParam);
+      const effectiveService =
+        selectedService !== "all"
+          ? selectedService
+          : onlyThisService
+            ? microservice
+            : null;
+      const moduleParam = selectedModule !== "all" ? selectedModule : "";
+      const functionParam = selectedFunction !== "all" ? selectedFunction : "";
+      const msParam = effectiveService ? String(effectiveService).trim() : "";
+      if (msParam) params.set("microservice", msParam);
+      if (moduleParam) params.set("module", moduleParam);
+      if (functionParam) params.set("function", functionParam);
+      if (dateStart) params.set("startDate", dateStart);
+      if (dateEnd) params.set("endDate", dateEnd);
+      const levelIdx = getLevelRank(levelFilter);
+      if (levelIdx >= 0) {
+        const levelsForQuery = levelOrder.slice(0, levelIdx + 1);
+        if (levelsForQuery.length > 0) params.set("level", levelsForQuery.join(","));
+      }
       const url = `${env.apiBaseUrl}/cachemanager/Log${params.toString() ? `?${params.toString()}` : ""}`;
       const res = await fetch(url, {
         headers: {
@@ -242,9 +398,20 @@ export default function MicroserviceLogsCard({
   };
 
   useEffect(() => {
+    setPage(0);
     fetchLogs(0, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [microservice, pageSize, onlyThisService]);
+  }, [
+    microservice,
+    pageSize,
+    onlyThisService,
+    selectedService,
+    selectedModule,
+    selectedFunction,
+    dateStart,
+    dateEnd,
+    levelFilter,
+  ]);
 
   useEffect(() => {
     setWsError(null);
@@ -255,14 +422,45 @@ export default function MicroserviceLogsCard({
           const service = String(msg?.microservice || "").toLowerCase();
           if (service && service !== String(microservice).toLowerCase()) return false;
         }
+        if (selectedService !== "all") {
+          const service = String(msg?.microservice || "").toLowerCase();
+          if (service !== String(selectedService).toLowerCase()) return false;
+        }
         const channel =
           typeof msg?.__channel === "string" ? msg.__channel : typeof msg?.channel === "string" ? msg.channel : "";
-        if (channel && !channel.startsWith("DEV.")) return false;
+        if (channel && !channel.startsWith(`${env.appEnv}.`)) return false;
         return channel.includes(".logs.") || typeof msg?.level === "string" || msg?.type === "log";
       },
       onMessage: (payload) => {
         const entry = normalizeMessage(payload);
         if (!entry) return;
+        if (
+          selectedFunction !== "all" &&
+          String(entry.functionName || "").toLowerCase() !==
+            String(selectedFunction).toLowerCase()
+        ) {
+          return;
+        }
+        if (
+          selectedModule !== "all" &&
+          String(entry.module || entry.moduleName || "").toLowerCase() !==
+            String(selectedModule).toLowerCase()
+        ) {
+          return;
+        }
+        if (dateStart || dateEnd) {
+          const startMs = dateStart ? new Date(dateStart).getTime() : null;
+          const endMs = dateEnd ? new Date(dateEnd).getTime() : null;
+          const tsRaw = entry.timestamp ?? (entry as any).ts ?? (entry as any).time;
+          const ts = tsRaw ? new Date(tsRaw as string).getTime() : NaN;
+          if (Number.isNaN(ts)) return;
+          if (startMs && ts < startMs) return;
+          if (endMs && ts > endMs) return;
+        }
+        if (messageQuery) {
+          const msg = String(entry.message || "").toLowerCase();
+          if (!msg.includes(messageQuery.toLowerCase())) return;
+        }
         setLiveRows((prev) => {
           const next = [entry, ...prev];
           return next.slice(0, 200);
@@ -280,13 +478,80 @@ export default function MicroserviceLogsCard({
     return () => {
       unsubscribe();
     };
-  }, [microservice, onlyThisService]);
+  }, [microservice, onlyThisService, selectedService, selectedModule, selectedFunction, dateStart, dateEnd, messageQuery]);
 
   const filteredRows = useMemo(() => {
     const threshold = getLevelRank(levelFilter);
     const combined = [...liveRows, ...rows];
-    return combined.filter((row) => getLevelRank(row.level) <= threshold);
-  }, [rows, liveRows, levelFilter]);
+    const effectiveService =
+      selectedService !== "all"
+        ? selectedService
+        : onlyThisService
+          ? microservice
+          : null;
+    const moduleParam = selectedModule !== "all" ? selectedModule : null;
+    const startMs = dateStart ? new Date(dateStart).getTime() : null;
+    const endMs = dateEnd ? new Date(dateEnd).getTime() : null;
+    return combined.filter((row) => {
+      if (getLevelRank(row.level) > threshold) return false;
+      if (selectedFunction !== "all") {
+        const fnOk =
+          String(row.functionName || "").toLowerCase() ===
+          String(selectedFunction).toLowerCase();
+        if (!fnOk) return false;
+      }
+      if (moduleParam) {
+        const modValue = String(row.module || row.moduleName || "").toLowerCase();
+        if (modValue !== String(moduleParam).toLowerCase()) return false;
+      }
+      if (startMs || endMs) {
+        const tsRaw = row.timestamp ?? row.ts ?? row.time;
+        const ts = tsRaw ? new Date(tsRaw as string).getTime() : NaN;
+        if (Number.isNaN(ts)) return false;
+        if (startMs && ts < startMs) return false;
+        if (endMs && ts > endMs) return false;
+      }
+      if (messageQuery) {
+        const msg = String(row.message || "").toLowerCase();
+        if (!msg.includes(messageQuery.toLowerCase())) return false;
+      }
+      if (!effectiveService) return true;
+      return (
+        String(row.microservice || "").toLowerCase() ===
+        String(effectiveService).toLowerCase()
+      );
+    });
+  }, [
+    rows,
+    liveRows,
+    levelFilter,
+    microservice,
+    onlyThisService,
+    selectedService,
+    selectedModule,
+    selectedFunction,
+    dateStart,
+    dateEnd,
+    messageQuery,
+  ]);
+
+  const moduleOptions = useMemo(() => {
+    const base = new Set<string>();
+    [...rows, ...liveRows].forEach((row) => {
+      const name = row?.module || row?.moduleName ? String(row.module || row.moduleName) : "";
+      if (name) base.add(name);
+    });
+    return ["all", ...Array.from(base).sort((a, b) => a.localeCompare(b))];
+  }, [rows, liveRows]);
+
+  const functionOptions = useMemo(() => {
+    const base = new Set<string>();
+    [...rows, ...liveRows].forEach((row) => {
+      const name = row?.functionName ? String(row.functionName) : "";
+      if (name) base.add(name);
+    });
+    return ["all", ...Array.from(base).sort((a, b) => a.localeCompare(b))];
+  }, [rows, liveRows]);
 
   const applyPageSize = (value: number) => {
     const next = Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), 1000) : 15;
@@ -294,22 +559,261 @@ export default function MicroserviceLogsCard({
     fetchLogs(0, next);
   };
 
-  const bodyClass = fillHeight ? "flex-1 min-h-0" : "max-h-64";
+  const renderHeader = (expanded: boolean) => (
+    <div className="px-3 py-2">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold text-slate-700">Logs</div>
+          <div className="text-[11px] text-slate-500">
+            {microservice ? `Microservice: ${microservice}` : "Ultimi log"}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex w-56 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+            {levelOrder.map((lvl, idx) => {
+              const isActive = levelFilter === lvl;
+              const isFilled = idx <= getLevelRank(levelFilter);
+              return (
+                <button
+                  key={lvl}
+                  type="button"
+                  className={`flex-1 border-r border-slate-200 px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition last:border-r-0 ${
+                    isFilled ? levelSolid[lvl] : "bg-slate-100 text-slate-500"
+                  } ${isActive ? "ring-1 ring-inset ring-slate-900" : ""}`}
+                  onClick={() => setLevelFilter(lvl)}
+                  disabled={loading}
+                >
+                  {lvl}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
+          <input
+            type="checkbox"
+            className="peer sr-only"
+            checked={onlyThisService}
+            onChange={(e) => setOnlyThisService(e.target.checked)}
+            disabled={loading}
+          />
+          <span
+            className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
+              onlyThisService ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
+            } ${loading ? "opacity-70" : ""}`}
+          >
+            <span
+              className={`h-4 w-4 rounded-full bg-white shadow transition ${
+                onlyThisService ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </span>
+          <span className="text-[11px] font-semibold text-slate-700">
+            {microservice || "Questo servizio"}
+          </span>
+        </label>
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
+          <input
+            type="checkbox"
+            className="peer sr-only"
+            checked={timeZone === "Asia/Dubai"}
+            onChange={(e) => setTimeZone(e.target.checked ? "Asia/Dubai" : "UTC")}
+            disabled={loading}
+          />
+          <span
+            className={`relative inline-flex h-5 w-12 items-center rounded-full border transition ${
+              timeZone === "Asia/Dubai" ? "border-slate-300 bg-slate-900" : "border-slate-300 bg-slate-200"
+            } ${loading ? "opacity-70" : ""}`}
+          >
+            <span
+              className={`h-4 w-4 rounded-full bg-white shadow transition ${
+                timeZone === "Asia/Dubai" ? "translate-x-6" : "translate-x-0.5"
+              }`}
+            />
+          </span>
+          <span className="text-[11px] font-semibold text-slate-700">
+            {timeZone === "Asia/Dubai" ? "Asia/Dubai" : "UTC"}
+          </span>
+        </label>
+        <select
+          className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none"
+          value={selectedService}
+          onChange={(event) => {
+            setSelectedService(event.target.value);
+          }}
+          disabled={loading}
+        >
+          {serviceOptions.map((service) => (
+            <option key={service} value={service}>
+              {service === "all" ? "Tutti i servizi" : service}
+            </option>
+          ))}
+        </select>
+        <select
+          className="h-8 min-w-[9rem] rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none"
+          value={selectedModule}
+          onChange={(event) => {
+            setSelectedModule(event.target.value);
+          }}
+          disabled={loading}
+        >
+          {moduleOptions.map((mod) => (
+            <option key={mod} value={mod}>
+              {mod === "all" ? "Tutti i moduli" : mod}
+            </option>
+          ))}
+        </select>
+        <select
+          className="h-8 min-w-[9rem] rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none"
+          value={selectedFunction}
+          onChange={(event) => {
+            setSelectedFunction(event.target.value);
+          }}
+          disabled={loading}
+        >
+          {functionOptions.map((fn) => (
+            <option key={fn} value={fn}>
+              {fn === "all" ? "Tutte le funzioni" : fn}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="Cerca messaggio..."
+          className="h-8 min-w-[10rem] rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 focus:border-blue-400 focus:outline-none"
+          value={messageQuery}
+          onChange={(event) => setMessageQuery(event.target.value)}
+          disabled={loading}
+        />
+        <div className="relative">
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+            onClick={() => setDatePickerOpen((prev) => !prev)}
+            title="Filtro data"
+          >
+            <AppIcon icon="mdi:calendar-range" />
+          </button>
+          {datePickerOpen && (
+            <div className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+              <div className="text-[11px] font-semibold text-slate-700">Range data</div>
+              <div className="mt-2 grid gap-2 text-[11px] text-slate-700">
+                <label className="grid gap-1">
+                  <span>Inizio</span>
+                  <input
+                    type="datetime-local"
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-800 focus:border-blue-400 focus:outline-none"
+                    value={dateStartDraft}
+                    onChange={(e) => setDateStartDraft(e.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span>Fine</span>
+                  <input
+                    type="datetime-local"
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-800 focus:border-blue-400 focus:outline-none"
+                    value={dateEndDraft}
+                    onChange={(e) => setDateEndDraft(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex items-center justify-between">
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-700"
+                  onClick={() => {
+                    setDateStart("");
+                    setDateEnd("");
+                    setDateStartDraft("");
+                    setDateEndDraft("");
+                  }}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    setDateStart(dateStartDraft);
+                    setDateEnd(dateEndDraft);
+                    setDatePickerOpen(false);
+                  }}
+                >
+                  Apply
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => setDatePickerOpen(false)}
+                >
+                  Chiudi
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        <BaseButton
+          variant="outline"
+          color="neutral"
+          size="sm"
+          startIcon={<AppIcon icon="mdi:refresh" />}
+          onClick={() => fetchLogs(page, pageSize)}
+          disabled={loading}
+        >
+          Aggiorna
+        </BaseButton>
+        <BaseButton
+          variant="outline"
+          color="neutral"
+          size="sm"
+          startIcon={<AppIcon icon="mdi:close-circle-outline" />}
+          onClick={() => {
+            setLevelFilter("log");
+            setSelectedService("all");
+            setSelectedModule("all");
+            setSelectedFunction("all");
+            setMessageQuery("");
+            setDateStart("");
+            setDateEnd("");
+            setDateStartDraft("");
+            setDateEndDraft("");
+          }}
+          disabled={loading}
+        >
+          Clear
+        </BaseButton>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+          onClick={() => setIsExpanded(!expanded)}
+          title={expanded ? "Comprimi" : "Espandi"}
+        >
+          <AppIcon icon={expanded ? "mdi:arrow-collapse" : "mdi:arrow-expand"} />
+        </button>
+      </div>
+    </div>
+  );
 
-  const renderLogsTable = () => (
-    <>
-      {error && (
-        <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
-          {error}
-        </div>
-      )}
-      {wsError && (
-        <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
-          {wsError}
-        </div>
-      )}
-      <div className="flex flex-1 flex-col overflow-x-auto">
-        <div className={`${bodyClass} overflow-y-auto`}>
+  const renderLogsTable = (forModal = false) => {
+    // In modal or when fillHeight is true, use flex-1 to fill available space
+    const tableBodyClass = forModal || fillHeight ? "flex-1 min-h-0" : "max-h-64";
+
+    return (
+      <div className="flex flex-1 min-h-0 flex-col">
+        {error && (
+          <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+            {error}
+          </div>
+        )}
+        {wsError && (
+          <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+            {wsError}
+          </div>
+        )}
+        <div className="flex flex-1 min-h-0 flex-col overflow-x-auto">
+          <div className={`${tableBodyClass} overflow-y-auto`}>
           <table className="min-w-full table-fixed divide-y divide-slate-200 text-[11px] text-slate-700">
             <colgroup>
               <col style={{ width: "5.5rem" }} />
@@ -319,29 +823,33 @@ export default function MicroserviceLogsCard({
               <col style={{ width: "8rem" }} />
               <col style={{ width: "8rem" }} />
               <col />
+              <col style={{ width: "3.25rem" }} />
             </colgroup>
             <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 sticky top-0">
               <tr>
                 <th className="px-3 py-2 font-semibold">ID</th>
-                <th className="px-3 py-2 font-semibold">Time</th>
+                <th className="px-3 py-2 font-semibold">
+                  Time {timeZone === "UTC" ? "(UTC)" : "(Asia/Dubai)"}
+                </th>
                 <th className="px-3 py-2 font-semibold">Level</th>
                 <th className="px-3 py-2 font-semibold">Service</th>
                 <th className="px-3 py-2 font-semibold">Module</th>
                 <th className="px-3 py-2 font-semibold">Function</th>
                 <th className="px-3 py-2 font-semibold">Message</th>
+                <th className="px-3 py-2 font-semibold">JSON</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && (
                 <tr>
-                  <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={7}>
+                  <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={8}>
                     Caricamento...
                   </td>
                 </tr>
               )}
               {!loading && filteredRows.length === 0 && (
                 <tr>
-                  <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={7}>
+                  <td className="px-3 py-3 text-[11px] text-slate-500" colSpan={8}>
                     Nessun log disponibile
                   </td>
                 </tr>
@@ -355,6 +863,7 @@ export default function MicroserviceLogsCard({
                       ? String(row.microservice).toLowerCase() === String(microservice).toLowerCase()
                       : true;
                   const isLive = Boolean((row as any).__live);
+                  const jsonDetails = row.jsonDetails ?? row.json_details ?? null;
                   return (
                     <tr
                       key={row.id || idx}
@@ -364,7 +873,7 @@ export default function MicroserviceLogsCard({
                         {row.id ?? "-"}
                       </td>
                       <td className={`px-3 py-2 whitespace-nowrap ${!isOwnService ? "text-slate-400" : ""}`}>
-                        {formatDateTime(row.timestamp as string)}
+                        {formatDateTime(row.timestamp as string, timeZone)}
                       </td>
                       <td className={`px-3 py-2 ${!isOwnService ? "text-slate-400" : ""}`}>
                         <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${pill}`}>
@@ -384,6 +893,21 @@ export default function MicroserviceLogsCard({
                         <div className="line-clamp-3 whitespace-pre-wrap break-words text-[11px]">
                           {row.message || "-"}
                         </div>
+                      </td>
+                      <td className={`px-3 py-2 ${!isOwnService ? "text-slate-400" : ""}`}>
+                        {jsonDetails ? (
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center rounded border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50"
+                            onClick={() => openJsonDetail(jsonDetails)}
+                            title="Dettagli JSON"
+                            aria-label="Dettagli JSON"
+                          >
+                            <AppIcon icon="mdi:code-json" className="h-3.5 w-3.5" />
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">-</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -438,113 +962,48 @@ export default function MicroserviceLogsCard({
           </div>
         </div>
       </div>
-    </>
-  );
+    </div>
+    );
+  };
 
   return (
     <div
       ref={containerRef}
-      className={`flex min-h-0 flex-col rounded-lg border border-slate-200 bg-white/70 shadow-sm ${className}`}
-      style={fillHeight && maxHeight ? { height: `${maxHeight}px` } : undefined}
+      className={`flex min-h-0 flex-col rounded-lg border border-slate-200 bg-white/70 shadow-sm ${fillHeight ? "flex-1" : ""} ${className}`}
     >
-      <div className="flex items-center justify-between px-3 py-2">
-        <div>
-          <div className="text-xs font-semibold text-slate-700">Logs</div>
-          <div className="text-[11px] text-slate-500">
-            {microservice ? `Microservice: ${microservice}` : "Ultimi log"}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold text-slate-600">Livello</span>
-            <div className="flex w-56 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
-              {levelOrder.map((lvl, idx) => {
-                const isActive = levelFilter === lvl;
-                const isFilled = idx <= getLevelRank(levelFilter);
-                return (
-                  <button
-                    key={lvl}
-                    type="button"
-                    className={`flex-1 border-r border-slate-200 px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition last:border-r-0 ${
-                      isFilled ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-500"
-                    } ${isActive ? "ring-1 ring-inset ring-slate-900" : ""}`}
-                    onClick={() => setLevelFilter(lvl)}
-                    disabled={loading}
-                  >
-                    {lvl}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
-            <input
-              type="checkbox"
-              className="peer sr-only"
-              checked={onlyThisService}
-              onChange={(e) => setOnlyThisService(e.target.checked)}
-              disabled={loading}
-            />
-            <span
-              className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                onlyThisService ? "border-emerald-300 bg-emerald-500" : "border-slate-300 bg-slate-200"
-              } ${loading ? "opacity-70" : ""}`}
-            >
-              <span
-                className={`h-4 w-4 rounded-full bg-white shadow transition ${
-                  onlyThisService ? "translate-x-4" : "translate-x-0.5"
-                }`}
-              />
-            </span>
-            <span className="text-[11px] font-semibold text-slate-700">Mostra solo questo servizio</span>
-          </label>
-          <BaseButton
-            variant="outline"
-            color="neutral"
-            size="sm"
-            startIcon={<AppIcon icon="mdi:refresh" />}
-            onClick={() => fetchLogs(page, pageSize)}
-            disabled={loading}
-          >
-            Aggiorna
-          </BaseButton>
-          <button
-            type="button"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-            onClick={() => setIsExpanded(true)}
-            title="Espandi"
-          >
-            <AppIcon icon="mdi:arrow-expand" />
-          </button>
-        </div>
-      </div>
+      {renderHeader(false)}
       {renderLogsTable()}
 
       {isExpanded && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 p-3 pb-16">
           <div
             ref={modalRef}
             tabIndex={-1}
-            className="flex h-full w-full flex-col rounded-xl border border-slate-200 bg-white shadow-xl outline-none"
+            className="flex max-h-full w-full flex-col rounded-xl border border-slate-200 bg-white shadow-xl outline-none"
           >
+            {renderHeader(true)}
+            {renderLogsTable(true)}
+          </div>
+        </div>
+      )}
+
+      {jsonDetail && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="flex w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <div>
-                <div className="text-base font-semibold text-slate-900">Logs</div>
-                <div className="text-xs text-slate-500">
-                  {microservice ? `Microservice: ${microservice}` : "Ultimi log"}
-                </div>
-              </div>
+              <div className="text-sm font-semibold text-slate-900">Dettagli JSON</div>
               <button
                 type="button"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-                onClick={() => setIsExpanded(false)}
-                title="Comprimi"
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                onClick={closeJsonDetail}
               >
-                <AppIcon icon="mdi:arrow-collapse" />
+                Close
               </button>
             </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
-              {renderLogsTable()}
+            <div className="max-h-[70vh] overflow-auto p-4">
+              <pre className="whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
+{JSON.stringify(jsonDetail, null, 2)}
+              </pre>
             </div>
           </div>
         </div>

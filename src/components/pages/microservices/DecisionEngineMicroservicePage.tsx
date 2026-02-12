@@ -6,6 +6,7 @@ import MicroserviceGeneralTab from "../../molecules/microservice/MicroserviceGen
 import { env } from "../../../config/env";
 import { IBKR_MARKET_DATA_FIELDS } from "../../../config/ibkrMarketDataFields";
 import { redisWsBridgeClient } from "../../../services/ws/redisWsBridgeClient";
+import { readStorageJson, writeStorageJson } from "../../../utils/storage";
 
 type Status = "idle" | "loading" | "error";
 
@@ -83,6 +84,15 @@ export default function DecisionEngineMicroservicePage({
   onHealthChange,
   onOpenReleaseModal,
 }: Props) {
+  const liveNavStorageKey = "astraai:decision-engine:live-nav";
+  const pipeNavStorageKey = "astraai:decision-engine:pipe-exec";
+  const readLiveNav = () => {
+    return readStorageJson<any | null>(liveNavStorageKey, null);
+  };
+  const readPipeNav = () => {
+    return readStorageJson<any | null>(pipeNavStorageKey, null);
+  };
+
   const [activeTab, setActiveTab] = useState<"general" | "spot" | "pipe" | "live">("general");
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
   const [health, setHealth] = useState<Record<string, any> | null>(null);
@@ -93,8 +103,15 @@ export default function DecisionEngineMicroservicePage({
   const [liveActive, setLiveActive] = useState<boolean>(false);
   const [liveTickers, setLiveTickers] = useState<string[]>([]);
   const [liveCandles, setLiveCandles] = useState<any[]>([]);
-  const [liveMaxRows, setLiveMaxRows] = useState<number>(5);
-  const [liveSortBy, setLiveSortBy] = useState<"time" | "ticker">("time");
+  const [liveMaxRows, setLiveMaxRows] = useState<number>(() => {
+    const stored = readLiveNav();
+    const val = Number(stored?.maxRows);
+    return Number.isFinite(val) && val > 0 ? val : 5;
+  });
+  const [liveSortBy, setLiveSortBy] = useState<"time" | "ticker">(() => {
+    const stored = readLiveNav();
+    return stored?.sortBy === "ticker" ? "ticker" : "time";
+  });
   const liveUnsubRef = useRef<null | (() => void)>(null);
   const [liveDetailRow, setLiveDetailRow] = useState<any>(null);
 
@@ -138,16 +155,29 @@ export default function DecisionEngineMicroservicePage({
   const [pipeList, setPipeList] = useState<any[]>([]);
   const [pipeListStatus, setPipeListStatus] = useState<Status>("idle");
   const [pipeListError, setPipeListError] = useState<string | null>(null);
-  const [pipeSelectedId, setPipeSelectedId] = useState<number | null>(null);
+  const [pipeSelectedId, setPipeSelectedId] = useState<number | null>(() => {
+    const stored = readPipeNav();
+    const val = Number(stored?.pipeId);
+    return Number.isFinite(val) && val > 0 ? val : null;
+  });
   const [pipeSelectedDate, setPipeSelectedDate] = useState<string>(() => {
+    const stored = readPipeNav();
+    if (stored?.date && typeof stored.date === "string") return stored.date;
     const now = new Date();
     return now.toISOString().slice(0, 10);
   });
-  const [pipeLimit, setPipeLimit] = useState<number>(50);
+  const [pipeLimit, setPipeLimit] = useState<number>(() => {
+    const stored = readPipeNav();
+    const val = Number(stored?.limit);
+    return Number.isFinite(val) && val > 0 ? val : 50;
+  });
   const [pipeMaxDistanceAtr, setPipeMaxDistanceAtr] = useState<number>(() => {
     if (typeof localStorage === "undefined") return 3;
-    const stored = Number(localStorage.getItem("astraai:pipe:maxDistanceAtr"));
-    return Number.isFinite(stored) ? stored : 3;
+    const stored = readPipeNav();
+    const val = Number(stored?.maxDistanceAtr);
+    if (Number.isFinite(val) && val > 0) return val;
+    const legacy = Number(localStorage.getItem("astraai:pipe:maxDistanceAtr"));
+    return Number.isFinite(legacy) ? legacy : 3;
   });
   const pipeDateRef = useRef<HTMLInputElement | null>(null);
   const [pipeJobId, setPipeJobId] = useState<string | null>(null);
@@ -161,6 +191,25 @@ export default function DecisionEngineMicroservicePage({
   const [pipeLatestNote, setPipeLatestNote] = useState<string | null>(null);
   const [pipeShowErrors, setPipeShowErrors] = useState(false);
   const [pipeDetailRow, setPipeDetailRow] = useState<any>(null);
+
+  useEffect(() => {
+    const payload = {
+      maxRows: liveMaxRows,
+      sortBy: liveSortBy,
+      date: pipeSelectedDate,
+    };
+    writeStorageJson(liveNavStorageKey, payload);
+  }, [liveMaxRows, liveSortBy, pipeSelectedDate]);
+
+  useEffect(() => {
+    const payload = {
+      pipeId: pipeSelectedId,
+      date: pipeSelectedDate,
+      limit: pipeLimit,
+      maxDistanceAtr: pipeMaxDistanceAtr,
+    };
+    writeStorageJson(pipeNavStorageKey, payload);
+  }, [pipeSelectedId, pipeSelectedDate, pipeLimit, pipeMaxDistanceAtr]);
 
   const formatNumber = (value: any, digits = 4) => {
     const num = Number(value);
@@ -309,37 +358,44 @@ export default function DecisionEngineMicroservicePage({
     setPipePollError(null);
   }, [pipeSelectedId, pipeSelectedDate]);
 
-  useEffect(() => {
+  const refreshPipeLatest = async () => {
     if (!pipeSelectedId || activeTab !== "pipe") return;
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     const dateValue = pipeDateRef.current?.value || pipeSelectedDate;
     const qs = dateValue ? `?date=${encodeURIComponent(dateValue)}` : "";
     setPipeLatestStatus("loading");
     setPipeLatestNote(null);
-    fetch(`${env.apiBaseUrl}/decision-engine/spot-finder/latest/${encodeURIComponent(pipeSelectedId)}${qs}`, {
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    })
-      .then((res) => res.json().catch(() => ({})))
-      .then((data) => {
-        if (data?.ok === false || !data?.data) {
-          setPipeLatestStatus("error");
-          setPipeLatestNote("Non ci sono dati recenti, riesegui l'elaborazione.");
-          return;
+    try {
+      const res = await fetch(
+        `${env.apiBaseUrl}/decision-engine/spot-finder/latest/${encodeURIComponent(pipeSelectedId)}${qs}`,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
         }
-        setPipeLatestStatus("idle");
-        setPipeLatestNote(null);
-        const snapshot = data.data;
-        setPipeStats(snapshot.stats || null);
-        setPipeResults(Array.isArray(snapshot.results) ? snapshot.results : []);
-        setPipeErrors(Array.isArray(snapshot.errors) ? snapshot.errors : []);
-      })
-      .catch(() => {
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false || !data?.data) {
         setPipeLatestStatus("error");
         setPipeLatestNote("Non ci sono dati recenti, riesegui l'elaborazione.");
-      });
+        return;
+      }
+      setPipeLatestStatus("idle");
+      setPipeLatestNote(null);
+      const snapshot = data.data;
+      setPipeStats(snapshot.stats || null);
+      setPipeResults(Array.isArray(snapshot.results) ? snapshot.results : []);
+      setPipeErrors(Array.isArray(snapshot.errors) ? snapshot.errors : []);
+    } catch {
+      setPipeLatestStatus("error");
+      setPipeLatestNote("Non ci sono dati recenti, riesegui l'elaborazione.");
+    }
+  };
+
+  useEffect(() => {
+    refreshPipeLatest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipeSelectedId, pipeSelectedDate, activeTab]);
 
   useEffect(() => {
@@ -446,7 +502,7 @@ export default function DecisionEngineMicroservicePage({
   }, [pipeResults, pipeErrors, pipeShowErrors]);
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-1 min-h-0 flex-col gap-4">
       <SectionHeader
         title={
           <div className="flex flex-col">
@@ -505,12 +561,14 @@ export default function DecisionEngineMicroservicePage({
       </div>
 
       {activeTab === "general" && (
-        <MicroserviceGeneralTab
-          microservice="decision-engine"
-          onReleaseChange={setRelease}
-          onHealthChange={setHealth}
-          onOpenReleaseModal={onOpenReleaseModal}
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <MicroserviceGeneralTab
+            microservice="decision-engine"
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={onOpenReleaseModal}
+          />
+        </div>
       )}
 
       {activeTab === "live" && (
@@ -2256,6 +2314,13 @@ export default function DecisionEngineMicroservicePage({
             </button>
             <button
               className="rounded-md border border-slate-300 px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              disabled={!pipeSelectedId || pipeLatestStatus === "loading"}
+              onClick={refreshPipeLatest}
+            >
+              Refresh
+            </button>
+            <button
+              className="rounded-md border border-slate-300 px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
               disabled={!pipeSelectedId || pipeRunStatus === "loading"}
               onClick={async () => {
                 const cacheValue = "false";
@@ -2627,7 +2692,7 @@ export default function DecisionEngineMicroservicePage({
 
       {pipeDetailRow && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="flex w-full max-w-3xl flex-col rounded-xl bg-white p-5 shadow-xl max-h-[85vh] overflow-y-auto">
+          <div className="flex w-full max-w-3xl flex-col rounded-xl bg-white p-5 shadow-xl max-h-[85vh]">
             {(() => {
               const detail = pipeDetailRow.fullResult || pipeDetailRow;
               const current = Number.isFinite(detail?.priceRef)
@@ -2635,6 +2700,7 @@ export default function DecisionEngineMicroservicePage({
                 : pipeDetailRow.currentPrice;
               const retracement = detail?.levels?.retracement;
               const breakout = detail?.levels?.breakout;
+              const params = detail?.params || pipeDetailRow?.params || null;
               return (
                 <>
                   <div className="mb-2 flex items-center justify-between">
@@ -2731,6 +2797,926 @@ export default function DecisionEngineMicroservicePage({
                           <div>
                             <span className="font-semibold">Risk:</span> {formatNumber(breakout?.risk, 4)}
                           </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-xs font-semibold text-slate-700">Summary</div>
+                        <div className="mt-2">
+                          <InfoRow
+                            name="atr20"
+                            value={formatNumber(detail?.atr20, 4)}
+                            description="Volatilita media (ATR 20) sul timeframe operativo."
+                          />
+                          <InfoRow
+                            name="eps"
+                            value={formatNumber(detail?.eps, 4)}
+                            description="Distanza massima per aggregare swing nello stesso livello."
+                          />
+                          <InfoRow
+                            name="window.startDate"
+                            value={formatDate(detail?.window?.startDate)}
+                            description="Inizio dello storico analizzato."
+                          />
+                          <InfoRow
+                            name="window.endDate"
+                            value={formatDate(detail?.window?.endDate)}
+                            description="Fine dello storico analizzato."
+                          />
+                          <InfoRow
+                            name="priceRef"
+                            value={formatNumber(detail?.priceRef, 4)}
+                            description="Prezzo di riferimento usato per supporti/resistenze."
+                          />
+                        </div>
+                      </div>
+                      {params && (
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                          <div className="text-xs font-semibold text-slate-700">Params</div>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            {[
+                              { key: "lookbackDays", label: "lookbackDays" },
+                              { key: "lookbackBars", label: "lookbackBars" },
+                              { key: "tf", label: "tf" },
+                              { key: "confirm", label: "confirm" },
+                              { key: "confirmLookbackDays", label: "confirmLookbackDays" },
+                              { key: "confirmLookbackBars", label: "confirmLookbackBars" },
+                              { key: "confirmTf", label: "confirmTf" },
+                              { key: "recentLookbackDays", label: "recentLookbackDays" },
+                              { key: "recentLookbackBars", label: "recentLookbackBars" },
+                              { key: "recentTf", label: "recentTf" },
+                              { key: "intradayLookbackDays", label: "intradayLookbackDays" },
+                              { key: "intradayLookbackBars", label: "intradayLookbackBars" },
+                              { key: "intradayTf", label: "intradayTf" },
+                              { key: "signalLookbackDays", label: "signalLookbackDays" },
+                              { key: "signalLookbackBars", label: "signalLookbackBars" },
+                              { key: "signalTf", label: "signalTf" },
+                              { key: "swingWindow", label: "swingWindow" },
+                              { key: "atrPeriod", label: "atrPeriod" },
+                              { key: "clusterMultiplier", label: "clusterMultiplier" },
+                              { key: "reactionLookahead", label: "reactionLookahead" },
+                              { key: "minTouches", label: "minTouches" },
+                              { key: "minScore", label: "minScore" },
+                              { key: "minRecentBars", label: "minRecentBars" },
+                              { key: "recencyRecent", label: "recencyRecent" },
+                              { key: "recencyMid", label: "recencyMid" },
+                              { key: "weightRecent", label: "weightRecent" },
+                              { key: "weightMid", label: "weightMid" },
+                              { key: "weightOld", label: "weightOld" },
+                              { key: "zoneFillK", label: "zoneFillK" },
+                              { key: "breakoutK", label: "breakoutK" },
+                              { key: "structuralK", label: "structuralK" },
+                              { key: "volatilityK", label: "volatilityK" },
+                              { key: "tpAtrK", label: "tpAtrK" },
+                              { key: "flagAtrK", label: "flagAtrK" },
+                              { key: "flagPctK", label: "flagPctK" },
+                              { key: "volMult", label: "volMult" },
+                              { key: "minStopAtrK", label: "minStopAtrK" },
+                              { key: "minTp2AtrK", label: "minTp2AtrK" },
+                            ].map((item) => (
+                              <InfoRow
+                                key={item.key}
+                                name={item.label}
+                                value={
+                                  Number.isFinite(Number(params[item.key]))
+                                    ? formatNumber(Number(params[item.key]), 4)
+                                    : params[item.key] ?? "-"
+                                }
+                                description="Parametro usato per il calcolo."
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-xs font-semibold text-slate-700">Zones</div>
+                        <div className="mt-2 text-[11px] text-slate-500">
+                          Livelli operativi aggregati in zone di prezzo.
+                        </div>
+                        {detail?.mergedZones && (
+                          <div className="mt-2 text-[11px] text-slate-500">
+                            Zone combinate (daily + recent + intraday): {detail?.mergedZones?.length ?? 0}
+                          </div>
+                        )}
+                        <div className="mt-2 overflow-auto">
+                          <table className="min-w-full divide-y divide-slate-200 text-xs">
+                            <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                              <tr>
+                                <th className="px-3 py-2 font-semibold">Type</th>
+                                <th className="px-3 py-2 font-semibold">Struct</th>
+                                <th className="px-3 py-2 font-semibold">Relative</th>
+                                <th className="px-3 py-2 font-semibold">Mid</th>
+                                <th className="px-3 py-2 font-semibold">Low</th>
+                                <th className="px-3 py-2 font-semibold">High</th>
+                                <th className="px-3 py-2 font-semibold">Width</th>
+                                <th className="px-3 py-2 font-semibold">Score</th>
+                                <th className="px-3 py-2 font-semibold">Touches</th>
+                                <th className="px-3 py-2 font-semibold">Recency</th>
+                                <th className="px-3 py-2 font-semibold">Source</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {(detail?.mergedZones || detail?.zones || []).map((zone: any, idx: number) => (
+                                <tr key={`${zone.type}-${idx}`} className="hover:bg-slate-50">
+                                  <td className="px-3 py-2 font-semibold text-slate-800">{zone.type}</td>
+                                  <td className="px-3 py-2 text-slate-700">{zone.structType ?? "-"}</td>
+                                  <td className="px-3 py-2 text-slate-700">{zone.relativeType ?? "-"}</td>
+                                  <td className="px-3 py-2 text-slate-700">{formatNumber(zone.midPrice, 4)}</td>
+                                  <td className="px-3 py-2 text-slate-700">{formatNumber(zone.low, 4)}</td>
+                                  <td className="px-3 py-2 text-slate-700">{formatNumber(zone.high, 4)}</td>
+                                  <td className="px-3 py-2 text-slate-700">{formatNumber(zone.width, 4)}</td>
+                                  <td className="px-3 py-2 text-slate-700">{formatNumber(zone.score, 3)}</td>
+                                  <td className="px-3 py-2 text-slate-700">{zone.touches ?? "-"}</td>
+                                  <td className="px-3 py-2 text-slate-700">{zone.recencyBars ?? "-"}</td>
+                                  <td className="px-3 py-2 text-slate-700">{zone.source || "-"}</td>
+                                </tr>
+                              ))}
+                              {(!detail?.mergedZones && (!detail?.zones || detail?.zones.length === 0)) && (
+                                <tr>
+                                  <td className="px-3 py-2 text-slate-500" colSpan={11}>
+                                    Nessuna zona disponibile.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-xs font-semibold text-slate-700">Levels</div>
+                        <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-700">Current price</div>
+                          <div className="mt-1 text-[11px] text-slate-700">{formatNumber(current, 4)}</div>
+                          <div className="text-[10px] text-slate-500">Prezzo attuale del titolo.</div>
+                        </div>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          {[
+                            { key: "retracement", label: "Ritracciamento", description: "Entry vicina al supporto." },
+                            { key: "breakout", label: "Breakout", description: "Entry sopra la resistenza." },
+                          ].map((block) => {
+                            const data = detail?.levels?.[block.key];
+                            const entry = data?.entryLimit ?? null;
+                            return (
+                              <div key={block.key} className="rounded-md border border-slate-200 bg-white px-3 py-2">
+                                <div className="text-[11px] font-semibold text-slate-700">{block.label}</div>
+                                <div className="text-[10px] text-slate-500">{block.description}</div>
+                                <div className="mt-1 text-[11px] text-slate-700">
+                                  {block.key === "breakout"
+                                    ? `Actionable: ${detail?.levels?.actionableBreakout ? "YES" : "NO"}`
+                                    : `Actionable: ${detail?.levels?.actionablePullback ? "YES" : "NO"}`}
+                                </div>
+                                {block.key === "breakout" && !detail?.levels?.actionableBreakout && data?.reason && (
+                                  <div className="text-[10px] text-slate-500">Reason: {data.reason}</div>
+                                )}
+                                {block.key === "retracement" && !detail?.levels?.actionablePullback && data?.reason && (
+                                  <div className="text-[10px] text-slate-500">Reason: {data.reason}</div>
+                                )}
+                                <div className="mt-2">
+                                  <InfoRow
+                                    name="entryLimit"
+                                    value={`${formatNumber(entry, 4)} (${formatPercent(pctDelta(entry, current))})`}
+                                    description="Prezzo di ingresso suggerito."
+                                  />
+                                  <InfoRow
+                                    name="stopLoss"
+                                    value={`${formatNumber(data?.stopLoss, 4)} (${formatPercent(
+                                      pctDelta(data?.stopLoss, entry)
+                                    )})`}
+                                    description="Stop loss rispetto all'entry."
+                                  />
+                                  <InfoRow
+                                    name="takeProfit1"
+                                    value={
+                                      data?.takeProfit1
+                                        ? `${formatNumber(data?.takeProfit1, 4)} (${formatPercent(
+                                            pctDelta(data?.takeProfit1, entry)
+                                          )})`
+                                        : "-"
+                                    }
+                                    description="TP tecnico sulla prossima resistenza."
+                                  />
+                                  <InfoRow
+                                    name="takeProfit2"
+                                    value={`${formatNumber(data?.takeProfit2, 4)} (${formatPercent(
+                                      pctDelta(data?.takeProfit2, entry)
+                                    )})`}
+                                    description="TP di trend basato su ATR."
+                                  />
+                                  <InfoRow
+                                    name="risk"
+                                    value={formatNumber(data?.risk, 4)}
+                                    description="Rischio per azione (entry - stop)."
+                                  />
+                                </div>
+                                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                                  <div className="text-[11px] font-semibold text-slate-700">Rule</div>
+                                  <div className="mt-1 grid gap-2 md:grid-cols-2">
+                                    {block.key === "retracement" && (
+                                      <InfoRow
+                                        name="zoneFillK"
+                                        value={data?.rule?.zoneFillK ?? "-"}
+                                        description="Posizione percentuale dentro la zona."
+                                      />
+                                    )}
+                                    {block.key === "breakout" && (
+                                      <InfoRow
+                                        name="breakoutK"
+                                        value={data?.rule?.breakoutK ?? "-"}
+                                        description="Buffer ATR sopra la resistenza."
+                                      />
+                                    )}
+                                    <InfoRow
+                                      name="structuralK"
+                                      value={data?.rule?.structuralK ?? "-"}
+                                      description="Buffer ATR per lo stop strutturale."
+                                    />
+                                    <InfoRow
+                                      name="volatilityK"
+                                      value={data?.rule?.volatilityK ?? "-"}
+                                      description="Moltiplicatore ATR per stop loss."
+                                    />
+                                    <InfoRow
+                                      name="tpAtrK"
+                                      value={data?.rule?.tpAtrK ?? "-"}
+                                      description="Moltiplicatore ATR per TP trend."
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-xs font-semibold text-slate-700">Signal</div>
+                        {detail?.signal ? (
+                          <>
+                            <div className="mt-2">
+                              <InfoRow
+                                name="timeframe"
+                                value={detail?.signal?.timeframe || "-"}
+                                description="Timeframe usato per il pattern detection."
+                              />
+                              <InfoRow
+                                name="lookbackDays"
+                                value={detail?.signal?.lookbackDays ?? "-"}
+                                description="Periodo storico per il segnale."
+                              />
+                              <InfoRow
+                                name="lookbackBars"
+                                value={detail?.signal?.lookbackBars ?? "-"}
+                                description="Numero barre analizzate per il segnale."
+                              />
+                              <InfoRow
+                                name="atr20"
+                                value={formatNumber(detail?.signal?.atr20, 4)}
+                                description="ATR calcolato sul timeframe di segnale."
+                              />
+                              <InfoRow
+                                name="stats.rawCandles"
+                                value={detail?.signal?.stats?.rawCandles ?? "-"}
+                                description="Candele ricevute dal provider (signal)."
+                              />
+                              <InfoRow
+                                name="stats.filteredCandles"
+                                value={detail?.signal?.stats?.filteredCandles ?? "-"}
+                                description="Candele valide dopo filtro (signal)."
+                              />
+                              <InfoRow
+                                name="window.startDate"
+                                value={formatDate(detail?.signal?.window?.startDate)}
+                                description="Inizio finestra segnale."
+                              />
+                              <InfoRow
+                                name="window.endDate"
+                                value={formatDate(detail?.signal?.window?.endDate)}
+                                description="Fine finestra segnale."
+                              />
+                            </div>
+                            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] font-semibold text-slate-700">Pattern</div>
+                              <div className="mt-1 grid gap-2 md:grid-cols-2">
+                                <InfoRow
+                                  name="trendOk"
+                                  value={
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        detail?.signal?.pattern?.trendOk
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-red-100 text-red-700"
+                                      }`}
+                                    >
+                                      {detail?.signal?.pattern?.trendOk ? "YES" : "NO"}
+                                    </span>
+                                  }
+                                  description="Trend positivo su EMA20/EMA50."
+                                />
+                                <InfoRow
+                                  name="flagOk"
+                                  value={
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        detail?.signal?.pattern?.flagOk
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-red-100 text-red-700"
+                                      }`}
+                                    >
+                                      {detail?.signal?.pattern?.flagOk ? "YES" : "NO"}
+                                    </span>
+                                  }
+                                  description="Flag valido con compressione range/volume."
+                                />
+                                <InfoRow
+                                  name="breakoutOk"
+                                  value={
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        detail?.signal?.pattern?.breakoutOk
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-red-100 text-red-700"
+                                      }`}
+                                    >
+                                      {detail?.signal?.pattern?.breakoutOk ? "YES" : "NO"}
+                                    </span>
+                                  }
+                                  description="Breakout confermato da close+volume."
+                                />
+                                <InfoRow
+                                  name="pullbackOk"
+                                  value={
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        detail?.signal?.pattern?.pullbackOk
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-red-100 text-red-700"
+                                      }`}
+                                    >
+                                      {detail?.signal?.pattern?.pullbackOk ? "YES" : "NO"}
+                                    </span>
+                                  }
+                                  description="Pullback valido con re-test del livello."
+                                />
+                                <InfoRow
+                                  name="ema20Last"
+                                  value={formatNumber(detail?.signal?.pattern?.debug?.ema20Last, 4)}
+                                  description="Ultimo valore EMA20 sul timeframe segnale."
+                                />
+                                <InfoRow
+                                  name="ema50Last"
+                                  value={formatNumber(detail?.signal?.pattern?.debug?.ema50Last, 4)}
+                                  description="Ultimo valore EMA50 sul timeframe segnale."
+                                />
+                                <InfoRow
+                                  name="lastClose"
+                                  value={formatNumber(detail?.signal?.pattern?.debug?.lastClose, 4)}
+                                  description="Ultimo close del timeframe segnale."
+                                />
+                                <InfoRow
+                                  name="volLast"
+                                  value={formatNumber(detail?.signal?.pattern?.debug?.volLast, 4)}
+                                  description="Volume dell'ultima candela."
+                                />
+                                <InfoRow
+                                  name="volMA20"
+                                  value={formatNumber(detail?.signal?.pattern?.debug?.volMA20, 4)}
+                                  description="Media volume 20 periodi."
+                                />
+                                <InfoRow
+                                  name="flagRange"
+                                  value={formatNumber(detail?.signal?.pattern?.debug?.flagRange, 4)}
+                                  description="Ampiezza del flag."
+                                />
+                                <InfoRow
+                                  name="atrLast"
+                                  value={formatNumber(detail?.signal?.pattern?.debug?.atrLast, 4)}
+                                  description="ATR dell'ultima candela segnale."
+                                />
+                                <InfoRow
+                                  name="breakLevel"
+                                  value={formatNumber(detail?.signal?.pattern?.breakLevel, 4)}
+                                  description="Livello di breakout del flag."
+                                />
+                                <InfoRow
+                                  name="flagHigh"
+                                  value={formatNumber(detail?.signal?.pattern?.flagHigh, 4)}
+                                  description="Massimo del flag."
+                                />
+                                <InfoRow
+                                  name="flagLow"
+                                  value={formatNumber(detail?.signal?.pattern?.flagLow, 4)}
+                                  description="Minimo del flag."
+                                />
+                                <InfoRow
+                                  name="entryBreakout"
+                                  value={formatNumber(detail?.signal?.pattern?.entryBreakout, 4)}
+                                  description="Entry breakout suggerita."
+                                />
+                                <InfoRow
+                                  name="entryPullback"
+                                  value={formatNumber(detail?.signal?.pattern?.entryPullback, 4)}
+                                  description="Entry pullback suggerita."
+                                />
+                                <InfoRow
+                                  name="stopLoss"
+                                  value={formatNumber(detail?.signal?.pattern?.stopLoss, 4)}
+                                  description="Stop loss pattern-based."
+                                />
+                                <InfoRow
+                                  name="tp1"
+                                  value={formatNumber(detail?.signal?.pattern?.targets?.tp1, 4)}
+                                  description="Target tecnico."
+                                />
+                                <InfoRow
+                                  name="tp2"
+                                  value={formatNumber(detail?.signal?.pattern?.targets?.tp2, 4)}
+                                  description="Target di trend."
+                                />
+                                <InfoRow
+                                  name="confidence"
+                                  value={detail?.signal?.pattern?.confidence ?? "-"}
+                                  description="Score di confidenza pattern."
+                                />
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="mt-2 text-[11px] text-slate-500">Segnale non disponibile.</div>
+                        )}
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-xs font-semibold text-slate-700">Confirm</div>
+                        {detail?.confirm ? (
+                          <>
+                            <div className="mt-2">
+                              <InfoRow
+                                name="timeframe"
+                                value={detail?.confirm?.timeframe || "-"}
+                                description="Timeframe di conferma."
+                              />
+                              <InfoRow
+                                name="lookbackDays"
+                                value={detail?.confirm?.lookbackDays ?? "-"}
+                                description="Periodo storico per la conferma."
+                              />
+                              <InfoRow
+                                name="lookbackBars"
+                                value={detail?.confirm?.lookbackBars ?? "-"}
+                                description="Numero barre di conferma."
+                              />
+                              <InfoRow
+                                name="atr20"
+                                value={formatNumber(detail?.confirm?.atr20, 4)}
+                                description="ATR calcolato su timeframe di conferma."
+                              />
+                              <InfoRow
+                                name="eps"
+                                value={formatNumber(detail?.confirm?.eps, 4)}
+                                description="Eps usato per clustering conferma."
+                              />
+                              <InfoRow
+                                name="window.startDate"
+                                value={formatDate(detail?.confirm?.window?.startDate)}
+                                description="Inizio dello storico di conferma."
+                              />
+                              <InfoRow
+                                name="window.endDate"
+                                value={formatDate(detail?.confirm?.window?.endDate)}
+                                description="Fine dello storico di conferma."
+                              />
+                            </div>
+                            <div className="mt-3 text-[11px] text-slate-500">
+                              Zone di conferma disponibili: {detail?.confirm?.zones?.length ?? 0}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="mt-2 text-[11px] text-slate-500">Conferma non disponibile.</div>
+                        )}
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                          <div className="text-xs font-semibold text-slate-700">Recent (1h)</div>
+                          {detail?.recent ? (
+                            <>
+                              <div className="mt-2">
+                                <InfoRow
+                                  name="timeframe"
+                                  value={detail?.recent?.timeframe || "-"}
+                                  description="Timeframe recente per livelli operativi."
+                                />
+                                <InfoRow
+                                  name="lookbackDays"
+                                  value={detail?.recent?.lookbackDays ?? "-"}
+                                  description="Periodo recente analizzato."
+                                />
+                                <InfoRow
+                                  name="lookbackBars"
+                                  value={detail?.recent?.lookbackBars ?? "-"}
+                                  description="Numero barre recenti."
+                                />
+                                <InfoRow
+                                  name="atr20"
+                                  value={formatNumber(detail?.recent?.atr20, 4)}
+                                  description="ATR calcolato su timeframe recente."
+                                />
+                                <InfoRow
+                                  name="eps"
+                                  value={formatNumber(detail?.recent?.eps, 4)}
+                                  description="Eps usato per clustering recente."
+                                />
+                                <InfoRow
+                                  name="window.startDate"
+                                  value={formatDate(detail?.recent?.window?.startDate)}
+                                  description="Inizio dello storico recente."
+                                />
+                                <InfoRow
+                                  name="window.endDate"
+                                  value={formatDate(detail?.recent?.window?.endDate)}
+                                  description="Fine dello storico recente."
+                                />
+                              </div>
+                              <div className="mt-3 text-[11px] text-slate-500">
+                                Zone recenti disponibili: {detail?.recent?.zones?.length ?? 0}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="mt-2 text-[11px] text-slate-500">Dati recenti non disponibili.</div>
+                          )}
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                          <div className="text-xs font-semibold text-slate-700">Intraday (1m)</div>
+                          {detail?.intraday ? (
+                            <>
+                              <div className="mt-2">
+                                <InfoRow
+                                  name="timeframe"
+                                  value={detail?.intraday?.timeframe || "-"}
+                                  description="Timeframe intraday per livelli rapidi."
+                                />
+                                <InfoRow
+                                  name="lookbackDays"
+                                  value={detail?.intraday?.lookbackDays ?? "-"}
+                                  description="Periodo intraday analizzato."
+                                />
+                                <InfoRow
+                                  name="lookbackBars"
+                                  value={detail?.intraday?.lookbackBars ?? "-"}
+                                  description="Numero barre intraday."
+                                />
+                                <InfoRow
+                                  name="atr20"
+                                  value={formatNumber(detail?.intraday?.atr20, 4)}
+                                  description="ATR calcolato su timeframe intraday."
+                                />
+                                <InfoRow
+                                  name="eps"
+                                  value={formatNumber(detail?.intraday?.eps, 4)}
+                                  description="Eps usato per clustering intraday."
+                                />
+                                <InfoRow
+                                  name="window.startDate"
+                                  value={formatDate(detail?.intraday?.window?.startDate)}
+                                  description="Inizio dello storico intraday."
+                                />
+                                <InfoRow
+                                  name="window.endDate"
+                                  value={formatDate(detail?.intraday?.window?.endDate)}
+                                  description="Fine dello storico intraday."
+                                />
+                              </div>
+                              <div className="mt-3 text-[11px] text-slate-500">
+                                Zone intraday disponibili: {detail?.intraday?.zones?.length ?? 0}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="mt-2 text-[11px] text-slate-500">Dati intraday non disponibili.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-xs font-semibold text-slate-700">Debug</div>
+                        <div className="mt-2 grid gap-3 md:grid-cols-2">
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="text-[11px] font-semibold text-slate-700">Price Debug</div>
+                            <InfoRow
+                              name="priceRef"
+                              value={formatNumber(detail?.priceDebug?.priceRef, 4)}
+                              description="Prezzo di riferimento usato."
+                            />
+                            <InfoRow
+                              name="dailyLastClose"
+                              value={formatNumber(detail?.priceDebug?.dailyLastClose, 4)}
+                              description="Ultimo close daily."
+                            />
+                            <InfoRow
+                              name="recentLastClose"
+                              value={formatNumber(detail?.priceDebug?.recentLastClose, 4)}
+                              description="Ultimo close 1h."
+                            />
+                            <InfoRow
+                              name="signalLastClose"
+                              value={formatNumber(detail?.priceDebug?.signalLastClose, 4)}
+                              description="Ultimo close timeframe segnale."
+                            />
+                            <InfoRow
+                              name="providerSymbol"
+                              value={detail?.priceDebug?.providerSymbol ?? "-"}
+                              description="Symbol usato per richieste candles."
+                            />
+                          </div>
+
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="text-[11px] font-semibold text-slate-700">ATR Debug</div>
+                            <InfoRow
+                              name="avgHL"
+                              value={formatNumber(detail?.atrDebug?.avgHL, 6)}
+                              description="Media high-low (ultime 200 barre)."
+                            />
+                            <InfoRow
+                              name="medianHL"
+                              value={formatNumber(detail?.atrDebug?.medianHL, 6)}
+                              description="Mediana high-low (ultime 200 barre)."
+                            />
+                            <InfoRow
+                              name="minHL"
+                              value={formatNumber(detail?.atrDebug?.minHL, 6)}
+                              description="Minimo high-low (ultime 200 barre)."
+                            />
+                            <InfoRow
+                              name="maxHL"
+                              value={formatNumber(detail?.atrDebug?.maxHL, 6)}
+                              description="Massimo high-low (ultime 200 barre)."
+                            />
+                            <InfoRow
+                              name="avgTR"
+                              value={formatNumber(detail?.atrDebug?.avgTR, 6)}
+                              description="Media TR (ultime 200 barre)."
+                            />
+                            <InfoRow
+                              name="atrLast"
+                              value={formatNumber(detail?.atrDebug?.atrLast, 6)}
+                              description="Ultimo ATR (timeframe segnale)."
+                            />
+                            <InfoRow
+                              name="atrTail"
+                              value={(detail?.atrDebug?.atrTail || []).map((v: number) => formatNumber(v, 6)).join(", ") || "-"}
+                              description="Ultimi 5 ATR."
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="flex items-center justify-between">
+                            <div className="text-[11px] font-semibold text-slate-700">Selection Debug</div>
+                            <button
+                              type="button"
+                              className="rounded-full border border-slate-200 bg-white p-1 text-slate-500 hover:text-slate-700"
+                              onClick={() => setSelectionDebugOpen((prev) => !prev)}
+                              aria-label={selectionDebugOpen ? "Collapse selection debug" : "Expand selection debug"}
+                            >
+                              <AppIcon
+                                icon={selectionDebugOpen ? "mdi:chevron-up" : "mdi:chevron-down"}
+                                width={14}
+                                height={14}
+                              />
+                            </button>
+                          </div>
+                          {selectionDebugOpen && (
+                            <div className="mt-2">
+                              <InfoRow
+                                name="usedAtrForTrading"
+                                value={
+                                  detail?.selectionDebug?.usedAtrForTrading
+                                    ? `${formatNumber(detail?.selectionDebug?.usedAtrForTrading?.value, 6)} (${detail?.selectionDebug?.usedAtrForTrading?.source}/${detail?.selectionDebug?.usedAtrForTrading?.timeframe})`
+                                    : "-"
+                                }
+                                description="ATR usato per entry/SL/TP."
+                              />
+                              <InfoRow
+                                name="usedTimeframeForLevels"
+                                value={detail?.selectionDebug?.usedTimeframeForLevels ?? "-"}
+                                description="Timeframe usato per livelli."
+                              />
+                              <InfoRow
+                                name="maxLevelDistanceAtr"
+                                value={formatNumber(detail?.selectionDebug?.maxLevelDistanceAtr, 2)}
+                                description="Soglia massima distanza in ATR per i supporti."
+                              />
+                              <InfoRow
+                                name="supportsWithinAtrCount"
+                                value={detail?.selectionDebug?.supportsWithinAtrCount ?? "-"}
+                                description="Numero supporti entro la soglia ATR."
+                              />
+                              <InfoRow
+                                name="supportHigherScoreWithinAtr"
+                                value={detail?.selectionDebug?.supportHigherScoreWithinAtr ? "YES" : "NO"}
+                                description="Esiste un supporto con score maggiore dentro soglia."
+                              />
+                              <InfoRow
+                                name="selectedSupport.midPrice"
+                                value={formatNumber(detail?.selectionDebug?.selectedSupport?.midPrice, 4)}
+                                description="Supporto selezionato."
+                              />
+                              <InfoRow
+                                name="selectedResistance.midPrice"
+                                value={formatNumber(detail?.selectionDebug?.selectedResistance?.midPrice, 4)}
+                                description="Resistenza selezionata."
+                              />
+                              <InfoRow
+                                name="distancePct"
+                                value={formatPercent(detail?.selectionDebug?.distancePct)}
+                                description="Distanza % dal supporto selezionato."
+                              />
+                              <InfoRow
+                                name="distanceAtr"
+                                value={formatNumber(detail?.selectionDebug?.distanceAtr, 4)}
+                                description="Distanza in ATR dal supporto selezionato."
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="text-[11px] font-semibold text-slate-700">Supports Top 5</div>
+                            <div className="mt-2 overflow-auto">
+                              <table className="min-w-full divide-y divide-slate-200 text-[10px]">
+                                <thead className="bg-white text-left text-[10px] uppercase tracking-wide text-slate-500">
+                                  <tr>
+                                    <th className="px-2 py-1">Mid</th>
+                                    <th className="px-2 py-1">Low</th>
+                                    <th className="px-2 py-1">High</th>
+                                    <th className="px-2 py-1">Score</th>
+                                    <th className="px-2 py-1">Touches</th>
+                                    <th className="px-2 py-1">Recency</th>
+                                    <th className="px-2 py-1">Source</th>
+                                    <th className="px-2 py-1">TF</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {(detail?.selectionDebug?.supportsTop5 || []).map((zone: any, idx: number) => (
+                                    <tr key={`support-${idx}`} className="hover:bg-white/50">
+                                      <td className="px-2 py-1">{formatNumber(zone.midPrice, 4)}</td>
+                                      <td className="px-2 py-1">{formatNumber(zone.low, 4)}</td>
+                                      <td className="px-2 py-1">{formatNumber(zone.high, 4)}</td>
+                                      <td className="px-2 py-1">{formatNumber(zone.score, 3)}</td>
+                                      <td className="px-2 py-1">{zone.touches ?? "-"}</td>
+                                      <td className="px-2 py-1">{zone.recencyBars ?? "-"}</td>
+                                      <td className="px-2 py-1">{zone.source ?? "-"}</td>
+                                      <td className="px-2 py-1">{zone.timeframe ?? "-"}</td>
+                                    </tr>
+                                  ))}
+                                  {(!detail?.selectionDebug?.supportsTop5 || detail?.selectionDebug?.supportsTop5?.length === 0) && (
+                                    <tr>
+                                      <td className="px-2 py-1 text-slate-500" colSpan={8}>
+                                        Nessun supporto.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="text-[11px] font-semibold text-slate-700">Resistances Top 5</div>
+                            <div className="mt-2 overflow-auto">
+                              <table className="min-w-full divide-y divide-slate-200 text-[10px]">
+                                <thead className="bg-white text-left text-[10px] uppercase tracking-wide text-slate-500">
+                                  <tr>
+                                    <th className="px-2 py-1">Mid</th>
+                                    <th className="px-2 py-1">Low</th>
+                                    <th className="px-2 py-1">High</th>
+                                    <th className="px-2 py-1">Score</th>
+                                    <th className="px-2 py-1">Touches</th>
+                                    <th className="px-2 py-1">Recency</th>
+                                    <th className="px-2 py-1">Source</th>
+                                    <th className="px-2 py-1">TF</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {(detail?.selectionDebug?.resistancesTop5 || []).map((zone: any, idx: number) => (
+                                    <tr key={`res-${idx}`} className="hover:bg-white/50">
+                                      <td className="px-2 py-1">{formatNumber(zone.midPrice, 4)}</td>
+                                      <td className="px-2 py-1">{formatNumber(zone.low, 4)}</td>
+                                      <td className="px-2 py-1">{formatNumber(zone.high, 4)}</td>
+                                      <td className="px-2 py-1">{formatNumber(zone.score, 3)}</td>
+                                      <td className="px-2 py-1">{zone.touches ?? "-"}</td>
+                                      <td className="px-2 py-1">{zone.recencyBars ?? "-"}</td>
+                                      <td className="px-2 py-1">{zone.source ?? "-"}</td>
+                                      <td className="px-2 py-1">{zone.timeframe ?? "-"}</td>
+                                    </tr>
+                                  ))}
+                                  {(!detail?.selectionDebug?.resistancesTop5 || detail?.selectionDebug?.resistancesTop5?.length === 0) && (
+                                    <tr>
+                                      <td className="px-2 py-1 text-slate-500" colSpan={8}>
+                                        Nessuna resistenza.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-700">Resistance Debug</div>
+                          <InfoRow
+                            name="countResistancesAbovePrice"
+                            value={detail?.resistanceDebug?.countResistancesAbovePrice ?? "-"}
+                            description="Numero resistenze sopra priceRef."
+                          />
+                          <div className="mt-2 overflow-auto">
+                            <table className="min-w-full divide-y divide-slate-200 text-[10px]">
+                              <thead className="bg-white text-left text-[10px] uppercase tracking-wide text-slate-500">
+                                <tr>
+                                  <th className="px-2 py-1">Mid</th>
+                                  <th className="px-2 py-1">Source</th>
+                                  <th className="px-2 py-1">Score</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {(detail?.resistanceDebug?.top5 || []).map((zone: any, idx: number) => (
+                                  <tr key={`res-top-${idx}`} className="hover:bg-white/50">
+                                    <td className="px-2 py-1">{formatNumber(zone.midPrice, 4)}</td>
+                                    <td className="px-2 py-1">{zone.source ?? "-"}</td>
+                                    <td className="px-2 py-1">{formatNumber(zone.score, 3)}</td>
+                                  </tr>
+                                ))}
+                                {(!detail?.resistanceDebug?.top5 || detail?.resistanceDebug?.top5?.length === 0) && (
+                                  <tr>
+                                    <td className="px-2 py-1 text-slate-500" colSpan={3}>
+                                      Nessuna resistenza sopra priceRef.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-700">Pattern Trend Debug</div>
+                          <InfoRow
+                            name="ema20Last"
+                            value={formatNumber(detail?.signal?.pattern?.debug?.trend?.ema20Last, 4)}
+                            description="EMA20 ultimo valore."
+                          />
+                          <InfoRow
+                            name="ema50Last"
+                            value={formatNumber(detail?.signal?.pattern?.debug?.trend?.ema50Last, 4)}
+                            description="EMA50 ultimo valore."
+                          />
+                          <InfoRow
+                            name="emaSpreadPct"
+                            value={formatPercent(detail?.signal?.pattern?.debug?.trend?.emaSpreadPct)}
+                            description="Differenza % EMA20/EMA50."
+                          />
+                          <InfoRow
+                            name="aboveEma20Count"
+                            value={detail?.signal?.pattern?.debug?.trend?.aboveEma20Count ?? "-"}
+                            description="Numero barre sopra EMA20."
+                          />
+                          <InfoRow
+                            name="consideredBars"
+                            value={detail?.signal?.pattern?.debug?.trend?.consideredBars ?? "-"}
+                            description="Barre considerate nel trend filter."
+                          />
+                          {detail?.signal?.pattern?.debug?.last12 && (
+                            <div className="mt-2">
+                              <div className="text-[11px] font-semibold text-slate-700">Last 12 bars</div>
+                              <div className="mt-2 overflow-auto">
+                                <table className="min-w-full divide-y divide-slate-200 text-[10px]">
+                                  <thead className="bg-white text-left text-[10px] uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                      <th className="px-2 py-1">Time</th>
+                                      <th className="px-2 py-1">Close</th>
+                                      <th className="px-2 py-1">EMA20</th>
+                                      <th className="px-2 py-1">Above</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {detail.signal.pattern.debug.last12.map((row: any, idx: number) => (
+                                      <tr key={`last12-${idx}`} className="hover:bg-white/50">
+                                        <td className="px-2 py-1">{formatDateTime(row?.t)}</td>
+                                        <td className="px-2 py-1">{formatNumber(row?.close, 4)}</td>
+                                        <td className="px-2 py-1">{formatNumber(row?.ema20, 4)}</td>
+                                        <td className="px-2 py-1">{row?.above ? "YES" : "NO"}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

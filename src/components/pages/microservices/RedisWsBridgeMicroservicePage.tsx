@@ -129,7 +129,7 @@ export default function RedisWsBridgeMicroservicePage({
   }, []);
 
   return (
-    <div>
+    <div className="flex flex-1 min-h-0 flex-col">
       {/* BARRA DEI TAB */}
       <div className="flex gap-6 border-b border-slate-200">
         {/* Tab General Settings */}
@@ -159,12 +159,14 @@ export default function RedisWsBridgeMicroservicePage({
 
       {/* Tab General: Usa il componente condiviso */}
       {activeTab === "general" && (
-        <MicroserviceGeneralTab
-          microservice="redisWsBridge"
-          onReleaseChange={onReleaseChange}
-          onHealthChange={onHealthChange}
-          onOpenReleaseModal={onOpenReleaseModal}
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <MicroserviceGeneralTab
+            microservice="redisWsBridge"
+            onReleaseChange={onReleaseChange}
+            onHealthChange={onHealthChange}
+            onOpenReleaseModal={onOpenReleaseModal}
+          />
+        </div>
       )}
 
       {/* Tab Websocket: Visualizzazione messaggi WebSocket in tempo reale */}

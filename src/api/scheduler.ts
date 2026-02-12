@@ -46,3 +46,31 @@ export async function createSchedulerJob(payload: Record<string, unknown>): Prom
 export async function deleteSchedulerJob(jobId: string | number): Promise<unknown> {
   return http.delete(`/scheduler/job/${jobId}`);
 }
+
+export type SchedulerLastRun = {
+  jobKey: string;
+  status: string;
+  last_run_at: string;
+  summary?: Record<string, unknown>;
+  error?: string | null;
+};
+
+export async function fetchSchedulerJobLastRun(
+  jobKey: string
+): Promise<SchedulerLastRun | null> {
+  const body = (await http.get(
+    `/scheduler/jobs/${encodeURIComponent(jobKey)}/last-run`
+  )) as { ok: boolean; data?: SchedulerLastRun };
+  return body?.data ?? null;
+}
+
+export async function runSchedulerJob(
+  jobKey: string,
+  overrides?: { headers?: Record<string, unknown>; body?: unknown }
+): Promise<{ ok: boolean; jobKey: string; message?: string; error?: string }> {
+  const data = await http.post<{ ok: boolean; jobKey: string; message?: string; error?: string }>(
+    `/scheduler/jobs/${encodeURIComponent(jobKey)}/run`,
+    overrides ?? {}
+  );
+  return data;
+}

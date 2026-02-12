@@ -9,6 +9,7 @@ const apiBaseFromEnv =
 export const env = {
   apiBaseUrl: normalizeUrl(apiBaseFromEnv),
   fmpApiKey: (import.meta.env.VITE_FMP_API_KEY as string) || "",
+  appEnv: (import.meta.env.VITE_ENV as string | undefined) || "DEV",
 };
 
 export type EnvConfig = typeof env;

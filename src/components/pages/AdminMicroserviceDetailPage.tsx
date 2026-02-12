@@ -9,6 +9,7 @@ import TickerScannerMicroservicePage from "./microservices/TickerScannerMicroser
 import MarketDataServiceMicroservicePage from "./microservices/MarketDataServiceMicroservicePage";
 import RedisWsBridgeMicroservicePage from "./microservices/RedisWsBridgeMicroservicePage";
 import CachemanagerMicroservicePage from "./microservices/CachemanagerMicroservicePage";
+import DbmanagerMicroservicePage from "./microservices/DbmanagerMicroservicePage";
 import DecisionEngineMicroservicePage from "./microservices/DecisionEngineMicroservicePage";
 import IbkrBridgeMicroservicePage from "./microservices/IbkrBridgeMicroservicePage";
 import IBKRKeepaliceMicroservicePage from "./microservices/IBKRKeepaliceMicroservicePage";
@@ -102,6 +103,15 @@ export default function AdminMicroserviceDetailPage() {
           />
         );
 
+      case "dbmanager":
+        return (
+          <DbmanagerMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
       case "decision-engine":
         return (
           <DecisionEngineMicroservicePage
@@ -161,7 +171,7 @@ export default function AdminMicroserviceDetailPage() {
   };
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="flex h-[calc(100vh-8rem)] flex-col gap-4 p-4">
       <SectionHeader
         title={
           <div className="flex flex-col">
@@ -189,7 +199,7 @@ export default function AdminMicroserviceDetailPage() {
       />
 
       {/* key forces re-mount when navigating between microservices */}
-      <div key={slug || "unknown"}>{renderMicroservice()}</div>
+      <div key={slug || "unknown"} className="flex-1 min-h-0 flex flex-col">{renderMicroservice()}</div>
 
       {/* Release Notes Modal */}
       {showReleaseModal && release && (
