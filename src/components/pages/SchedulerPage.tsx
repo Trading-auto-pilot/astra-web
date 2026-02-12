@@ -12,9 +12,9 @@ import {
   type SchedulerJob,
   type SchedulerLastRun,
 } from "../../api/scheduler";
-import { redisWsBridgeClient } from "../../services/ws/redisWsBridgeClient";
 import { resolveText } from "../../utils/textResolver";
 import TextResolverHelpModal from "../molecules/content/TextResolverHelpModal";
+import { redisWsBridgeClient } from "../../services/ws/redisWsBridgeClient";
 
 type Status = "idle" | "loading" | "error";
 type RuleDraft = {
@@ -197,6 +197,7 @@ export function SchedulerPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [lastRunsByJobKey, setLastRunsByJobKey] = useState<Record<string, unknown>>({});
   const [showRunModal, setShowRunModal] = useState(false);
   const [selectedRunJobKey, setSelectedRunJobKey] = useState<string | null>(null);
   const [lastRunData, setLastRunData] = useState<SchedulerLastRun | null>(null);
@@ -238,9 +239,10 @@ export function SchedulerPage() {
         return typeof msg.jobKey === "string" && msg.jobKey.trim().length > 0;
       },
       onMessage: (payload) => {
-        const jobKey = String(payload.jobKey || "").trim();
+        const data = payload as Record<string, unknown>;
+        const jobKey = String(data.jobKey ?? "").trim();
         if (!jobKey) return;
-        setLastRunsByJobKey((prev) => ({ ...prev, [jobKey]: payload }));
+        setLastRunsByJobKey((prev) => ({ ...prev, [jobKey]: data }));
       },
     });
 
@@ -249,7 +251,7 @@ export function SchedulerPage() {
     };
   }, []);
 
-  const rows = useMemo(() => jobs, [jobs]);
+  const rows = useMemo(() => jobs, [jobs, lastRunsByJobKey]);
 
   const seedDraftFromJob = (job: SchedulerJob) => {
     setEditingDraft({ ...job });
