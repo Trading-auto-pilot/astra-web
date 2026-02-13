@@ -2,6 +2,7 @@ import { useState } from "react";
 import LandingLayout from "../../../layouts/LandingLayout";
 import Title from "../../atoms/typography/Title";
 import { useRelease } from "../../../hooks/useReleaseInfo";
+import { env } from "../../../config/env";
 
 export default function Homepage() {
   const release = useRelease();
@@ -33,14 +34,14 @@ export default function Homepage() {
       </section>
 
       <section className="relative z-20 -mt-12 px-6 pb-12">
-        <div className="mx-auto max-w-3xl h-64 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-lg backdrop-blur flex flex-col">
+        <div className="mx-auto max-w-3xl min-h-[16rem] rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-lg backdrop-blur flex flex-col">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Release info</h2>
             <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
               Aggiornata
             </span>
           </div>
-          <div className="divide-y divide-slate-200 text-sm text-slate-800 flex-1 overflow-hidden">
+          <div className="divide-y divide-slate-200 text-sm text-slate-800 flex-1 overflow-auto">
             <div className="grid grid-cols-1 gap-2 py-3 sm:grid-cols-3 sm:items-center">
               <div className="font-medium text-slate-600">Versione</div>
               <div className="sm:col-span-2 flex items-center gap-3 text-slate-900">
@@ -72,6 +73,16 @@ export default function Homepage() {
                 ) : (
                   <span>-</span>
                 )}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 py-3 sm:grid-cols-3 sm:items-center">
+              <div className="font-medium text-slate-600">VITE_ENV</div>
+              <div className="sm:col-span-2 text-slate-900">{env.appEnv || "-"}</div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 py-3 sm:grid-cols-3 sm:items-center">
+              <div className="font-medium text-slate-600">VITE_API_BASE_URL</div>
+              <div className="sm:col-span-2 text-slate-900 break-all">
+                {env.apiBaseUrl || "-"}
               </div>
             </div>
           </div>
