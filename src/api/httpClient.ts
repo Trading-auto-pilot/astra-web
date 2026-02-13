@@ -36,6 +36,57 @@ export const removeToken = (): void => {
   localStorage.removeItem(AUTH_TOKEN_KEY);
 };
 
+const RENEW_THRESHOLD_SECONDS = 5 * 60;
+let renewInFlight: Promise<string | null> | null = null;
+
+const parseJwtPayload = (token: string): Record<string, unknown> | null => {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = atob(base64);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
+const shouldRenewToken = (token: string): boolean => {
+  const payload = parseJwtPayload(token);
+  const exp = typeof payload?.exp === "number" ? payload.exp : null;
+  if (!exp) return false;
+  const now = Math.floor(Date.now() / 1000);
+  return exp - now <= RENEW_THRESHOLD_SECONDS;
+};
+
+const renewTokenIfNeeded = async (token: string | null): Promise<string | null> => {
+  if (!token) return null;
+  if (!shouldRenewToken(token)) return token;
+  if (renewInFlight) return renewInFlight;
+  renewInFlight = (async () => {
+    try {
+      const resp = await fetch(buildUrl("/auth/renew"), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+      });
+      const data = await parseJsonSafely(resp);
+      if (!resp.ok) return token;
+      const nextToken = (data as Record<string, unknown>)?.token;
+      if (typeof nextToken === "string" && nextToken.length > 0) {
+        setToken(nextToken);
+        return nextToken;
+      }
+      return token;
+    } catch {
+      return token;
+    } finally {
+      renewInFlight = null;
+    }
+  })();
+  return renewInFlight;
+};
+
 /**
  * Safely parse JSON response, returning empty object or raw text on failure
  */
@@ -83,7 +134,7 @@ export async function httpClient<T = unknown>(
   const { skipAuth, absoluteUrl, ...fetchOptions } = options;
 
   const url = absoluteUrl ? path : buildUrl(path);
-  const token = skipAuth ? null : getToken();
+  const token = skipAuth ? null : await renewTokenIfNeeded(getToken());
 
   const response = await fetch(url, {
     credentials: "include",
