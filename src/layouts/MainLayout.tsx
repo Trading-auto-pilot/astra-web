@@ -3,6 +3,7 @@ import Logo from "../components/atoms/media/Logo";
 import UserMenu from "../components/molecules/navigation/UserMenu";
 import { useRelease } from "../hooks/useReleaseInfo";
 import BaseButton from "../components/atoms/base/buttons/BaseButton";
+import AppIcon from "../components/atoms/icon/AppIcon";
 import { fetchServiceFlags } from "../api/serviceFlags";
 import { redisWsBridgeClient } from "../services/ws/redisWsBridgeClient";
 import { env } from "../config/env";
@@ -64,7 +65,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     }
 
     if (page === "admin/*" || page === "admin") {
-      ["users", "api_key", "scheduler", "microservice"].forEach((segment) => {
+      ["users", "api_key", "logs", "scheduler", "microservice"].forEach((segment) => {
         const href = `#/admin/${segment}`;
         const label =
           segment === "api_key"
@@ -101,7 +102,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
   }
 
   if (adminChildren.length) {
-    const order = { users: 0, api_key: 1, scheduler: 2, microservice: 3 } as Record<string, number>;
+    const order = { users: 0, api_key: 1, logs: 2, scheduler: 3, microservice: 4 } as Record<string, number>;
     adminChildren.sort((a, b) => {
       const aKey = String(a.href || "").replace(/^#\/admin\//, "");
       const bKey = String(b.href || "").replace(/^#\/admin\//, "");
@@ -126,6 +127,10 @@ export function MainLayout({
   const navLinks = buildNavLinks(navEntries);
   const currentHash = typeof window !== "undefined" ? window.location.hash || "#/overview" : "#/overview";
   const [openNav, setOpenNav] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof localStorage === "undefined") return false;
+    return localStorage.getItem("astraai:sidebar:collapsed") === "true";
+  });
   const [showReleaseModal, setShowReleaseModal] = useState(false);
   const [microservices, setMicroservices] = useState<string[]>([]);
   const [microserviceMenuOpen, setMicroserviceMenuOpen] = useState(false);
@@ -198,6 +203,16 @@ export function MainLayout({
   };
 
   const closeNav = () => setOpenNav(false);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("astraai:sidebar:collapsed", String(next));
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     fetchServiceFlags()
@@ -279,20 +294,45 @@ export function MainLayout({
     <div className="flex min-h-screen bg-slate-50">
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 transform border-r border-slate-200 bg-white p-4 transition-transform duration-200 md:static md:translate-x-0 ${
-          openNav ? "translate-x-0 shadow-lg" : "-translate-x-full md:translate-x-0"
-        }`}
+        className={`fixed inset-y-0 left-0 z-40 transform border-r border-slate-200 bg-white p-4 transition-all duration-200 md:static md:translate-x-0 ${
+          sidebarCollapsed ? "md:w-16" : "md:w-60"
+        } ${openNav ? "w-60 translate-x-0 shadow-lg" : "w-60 -translate-x-full md:translate-x-0"}`}
       >
         <div className="flex items-center justify-between">
-          <Logo />
-          <button
-            className="rounded-md p-2 text-slate-600 hover:bg-slate-100 md:hidden"
-            onClick={closeNav}
-            aria-label="Close menu"
-          >
-            ✕
-          </button>
+          {!sidebarCollapsed && <Logo />}
+          {sidebarCollapsed && (
+            <button
+              className="mx-auto rounded-md p-2 text-slate-600 hover:bg-slate-100"
+              onClick={toggleSidebar}
+              aria-label="Espandi menu"
+              title="Espandi menu"
+            >
+              <AppIcon icon="mdi:menu" width={20} height={20} />
+            </button>
+          )}
+          {!sidebarCollapsed && (
+            <button
+              className="rounded-md p-2 text-slate-600 hover:bg-slate-100 md:hidden"
+              onClick={closeNav}
+              aria-label="Close menu"
+            >
+              ✕
+            </button>
+          )}
         </div>
+        {!sidebarCollapsed && (
+          <button
+            className="mt-2 hidden w-full rounded-md p-2 text-left text-xs text-slate-600 hover:bg-slate-100 md:block"
+            onClick={toggleSidebar}
+            aria-label="Comprimi menu"
+            title="Comprimi menu"
+          >
+            <div className="flex items-center justify-between">
+              <span>Comprimi</span>
+              <AppIcon icon="mdi:chevron-left" width={16} height={16} />
+            </div>
+          </button>
+        )}
         <nav className="mt-6 space-y-2 text-sm text-slate-700">
           {navLinks.map((link) => {
             if (link.children && link.children.length) {
@@ -302,20 +342,37 @@ export function MainLayout({
               );
               return (
                 <div key={link.label} className="space-y-1">
-                  <div
-                    className={`px-3 py-2 text-[11px] font-semibold uppercase tracking-wide ${
-                      activeChild ? "text-slate-800" : "text-slate-500"
-                    }`}
-                  >
-                    {link.label}
-                  </div>
-                  <div className="space-y-1 pl-2">
+                  {!sidebarCollapsed && (
+                    <div
+                      className={`px-3 py-2 text-[11px] font-semibold uppercase tracking-wide ${
+                        activeChild ? "text-slate-800" : "text-slate-500"
+                      }`}
+                    >
+                      {link.label}
+                    </div>
+                  )}
+                  <div className={`space-y-1 ${sidebarCollapsed ? "" : "pl-2"}`}>
                     {link.children.map((child) => {
                       const isMicroserviceEntry = child.label === "Microservice";
                       const isActive =
                         child.href && (currentHash === child.href || currentHash.startsWith(`${child.href}/`));
                       if (isMicroserviceEntry) {
                         const microHref = child.href ?? "#/admin/microservice";
+                        if (sidebarCollapsed) {
+                          return (
+                            <a
+                              key={child.href ?? child.label}
+                              className={`flex items-center justify-center rounded-md px-2 py-2 hover:bg-slate-100 ${
+                                isActive ? "bg-slate-100 font-semibold text-slate-900" : ""
+                              }`}
+                              href={microHref}
+                              onClick={closeNav}
+                              title="Microservice"
+                            >
+                              <AppIcon icon="mdi:cog-outline" width={20} height={20} />
+                            </a>
+                          );
+                        }
                         return (
                           <div key={child.href ?? child.label} className="space-y-1">
                             <div
@@ -367,6 +424,34 @@ export function MainLayout({
                           </div>
                         );
                       }
+
+                      // Map child labels to icons
+                      const getIconForLabel = (label: string) => {
+                        if (label === "Users") return "mdi:account-group";
+                        if (label === "API Key") return "mdi:key-variant";
+                        if (label === "Logs") return "mdi:text-box-outline";
+                        if (label === "Scheduler") return "mdi:clock-outline";
+                        if (label === "Tickers") return "mdi:chart-line";
+                        if (label === "User Tickers") return "mdi:account-star";
+                        return "mdi:circle";
+                      };
+
+                      if (sidebarCollapsed) {
+                        return (
+                          <a
+                            key={child.href ?? child.label}
+                            className={`flex items-center justify-center rounded-md px-2 py-2 hover:bg-slate-100 ${
+                              isActive ? "bg-slate-100 font-semibold text-slate-900" : ""
+                            }`}
+                            href={child.href ?? "#"}
+                            onClick={closeNav}
+                            title={child.label}
+                          >
+                            <AppIcon icon={getIconForLabel(child.label)} width={20} height={20} />
+                          </a>
+                        );
+                      }
+
                       return (
                         <a
                           key={child.href ?? child.label}
@@ -386,6 +471,29 @@ export function MainLayout({
             }
 
             const isActive = link.href && (currentHash === link.href || currentHash.startsWith(`${link.href}/`));
+
+            // Map top-level labels to icons
+            const getTopLevelIcon = (label: string) => {
+              if (label === "Overview") return "mdi:view-dashboard";
+              return "mdi:circle";
+            };
+
+            if (sidebarCollapsed) {
+              return (
+                <a
+                  key={link.href ?? link.label}
+                  className={`flex items-center justify-center rounded-md px-2 py-2 hover:bg-slate-100 ${
+                    isActive ? "bg-slate-100 font-semibold text-slate-900" : ""
+                  }`}
+                  href={link.href ?? "#"}
+                  onClick={closeNav}
+                  title={link.label}
+                >
+                  <AppIcon icon={getTopLevelIcon(link.label)} width={20} height={20} />
+                </a>
+              );
+            }
+
             return (
               <a
                 key={link.href ?? link.label}
@@ -416,7 +524,7 @@ export function MainLayout({
               ☰
             </button>
             <div className="text-lg font-semibold text-slate-900">
-              Astra Trading AI <span className="text-slate-500">(Autopilot)</span>
+              Astra Trading AI <span className="text-slate-500">(Ambiente: {env.appEnv})</span>
             </div>
           </div>
           <UserMenu userName={userName} />

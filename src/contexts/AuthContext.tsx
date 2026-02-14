@@ -71,6 +71,7 @@ const normalizeAllowedPages = (rawPages: string[]): string[] => {
     if (!expanded.includes("admin/users")) expanded.push("admin/users");
     if (!expanded.includes("admin/scheduler")) expanded.push("admin/scheduler");
     if (!expanded.includes("admin/api_key")) expanded.push("admin/api_key");
+    if (!expanded.includes("admin/logs")) expanded.push("admin/logs");
     if (!expanded.includes("admin/microservice")) expanded.push("admin/microservice");
   }
 

@@ -5,6 +5,7 @@ import UserTickersPage from "./UserTickersPage";
 import UsersPage from "./UsersPage";
 import SchedulerPage from "./SchedulerPage";
 import ApiKeysPage from "./ApiKeysPage";
+import LogsPage from "./LogsPage";
 import AdminMicroservicePage from "./AdminMicroservicePage";
 import AdminMicroserviceDetailPage from "./AdminMicroserviceDetailPage";
 import UserSettingsPage from "./UserSettingsPage";
@@ -29,6 +30,7 @@ type AppSection =
   | "users"
   | "scheduler"
   | "apiKeys"
+  | "logs"
   | "microservice"
   | "userSettings";
 
@@ -50,6 +52,7 @@ const getAppSection = (): AppSection => {
     if (parts[1] === "users") return "users";
     if (parts[1] === "scheduler") return "scheduler";
     if (parts[1] === "api_key") return "apiKeys";
+    if (parts[1] === "logs") return "logs";
     if (parts[1] === "microservice") return "microservice";
     return "overview";
   }
@@ -238,6 +241,14 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <ApiKeysPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "logs") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <LogsPage />
       </DashboardLayout>
     );
   }

@@ -154,6 +154,37 @@ export default function MicroserviceLogsCard({
   const [isExpanded, setIsExpanded] = useState(false);
   const modalRef = useRef<HTMLDivElement | null>(null);
   const [jsonDetail, setJsonDetail] = useState<any | null>(null);
+  const [selectedRow, setSelectedRow] = useState<LogRow | null>(null);
+  const [alertMode, setAlertMode] = useState(false);
+  const [alertSaveStatus, setAlertSaveStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [alertSaveError, setAlertSaveError] = useState<string | null>(null);
+  const [alertFormData, setAlertFormData] = useState<{
+    name: string;
+    enabled: boolean;
+    levels: string[];
+    microservice: string;
+    module: string;
+    functionName: string;
+    message: string;
+    channelWhatsapp: boolean;
+    channelEmail: boolean;
+    emailTo: string;
+    emailSubject: string;
+    template: string;
+  }>({
+    name: "",
+    enabled: true,
+    levels: [],
+    microservice: "",
+    module: "",
+    functionName: "",
+    message: "",
+    channelWhatsapp: true,
+    channelEmail: false,
+    emailTo: "",
+    emailSubject: "",
+    template: "Alert: {{message}}",
+  });
 
   const openJsonDetail = (value: any) => {
     setJsonDetail(value ?? null);
@@ -161,6 +192,87 @@ export default function MicroserviceLogsCard({
 
   const closeJsonDetail = () => {
     setJsonDetail(null);
+  };
+
+  const openRowDetail = (row: LogRow) => {
+    setSelectedRow(row);
+    setAlertMode(false);
+  };
+
+  const closeRowDetail = () => {
+    setSelectedRow(null);
+    setAlertMode(false);
+  };
+
+  const enableAlertMode = () => {
+    if (!selectedRow) return;
+    const serviceName = String(selectedRow.microservice || "");
+    const msgText = String(selectedRow.message || "");
+    setAlertFormData({
+      name: `Alert ${serviceName} - ${normalizeLevel(selectedRow.level)}`,
+      enabled: true,
+      levels: [normalizeLevel(selectedRow.level)],
+      microservice: serviceName,
+      module: String(selectedRow.module || selectedRow.moduleName || ""),
+      functionName: String(selectedRow.functionName || ""),
+      message: msgText,
+      channelWhatsapp: true,
+      channelEmail: false,
+      emailTo: "",
+      emailSubject: `Alert ${serviceName}`,
+      template: `Alert: {{message}}`,
+    });
+    setAlertMode(true);
+    setAlertSaveStatus("idle");
+    setAlertSaveError(null);
+  };
+
+  const handleSaveAlert = async () => {
+    setAlertSaveStatus("loading");
+    setAlertSaveError(null);
+    try {
+      const matchJson = {
+        levels: alertFormData.levels,
+        services: alertFormData.microservice ? [alertFormData.microservice] : [],
+        message_grep: alertFormData.message.trim(),
+      };
+      const channels = [
+        ...(alertFormData.channelWhatsapp ? ["whatsapp"] : []),
+        ...(alertFormData.channelEmail ? ["email"] : []),
+      ];
+      const actionsJson = {
+        channels,
+        template: alertFormData.template.trim(),
+        to: alertFormData.emailTo.trim(),
+        subject: alertFormData.emailSubject.trim(),
+      };
+      const payload = {
+        name: alertFormData.name.trim(),
+        enabled: alertFormData.enabled ? 1 : 0,
+        match_json: matchJson,
+        actions_json: actionsJson,
+      };
+
+      const res = await fetch(`${env.apiBaseUrl}/alertingservice/alerting-rules`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore salvataggio alert");
+      }
+
+      setAlertSaveStatus("idle");
+      closeRowDetail();
+    } catch (err: any) {
+      setAlertSaveStatus("error");
+      setAlertSaveError(err?.message || "Errore salvataggio alert");
+    }
   };
 
   const extractEmbeddedJson = (text: string): { message: string; json: any | null } => {
@@ -814,7 +926,7 @@ export default function MicroserviceLogsCard({
         )}
         <div className="flex flex-1 min-h-0 flex-col overflow-x-auto">
           <div className={`${tableBodyClass} overflow-y-auto`}>
-          <table className="min-w-full table-fixed divide-y divide-slate-200 text-[11px] text-slate-700">
+          <table className="w-full table-fixed divide-y divide-slate-200 text-[11px] text-slate-700">
             <colgroup>
               <col style={{ width: "5.5rem" }} />
               <col style={{ width: "9rem" }} />
@@ -867,10 +979,11 @@ export default function MicroserviceLogsCard({
                   return (
                     <tr
                       key={row.id || idx}
-                      className={`hover:bg-slate-50 ${isLive ? "bg-amber-50/70" : ""}`}
+                      className={`cursor-pointer hover:bg-slate-50 ${isLive ? "bg-amber-50/70" : ""}`}
+                      onClick={() => openRowDetail(row)}
                     >
                       <td className={`px-3 py-2 whitespace-nowrap ${!isOwnService ? "text-slate-400" : ""}`}>
-                        {row.id ?? "-"}
+                        {isLive && row.id ? `L.${String(row.id).slice(-3)}` : (row.id ?? "-")}
                       </td>
                       <td className={`px-3 py-2 whitespace-nowrap ${!isOwnService ? "text-slate-400" : ""}`}>
                         {formatDateTime(row.timestamp as string, timeZone)}
@@ -899,7 +1012,10 @@ export default function MicroserviceLogsCard({
                           <button
                             type="button"
                             className="inline-flex items-center justify-center rounded border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-700 hover:bg-slate-50"
-                            onClick={() => openJsonDetail(jsonDetails)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openJsonDetail(jsonDetails);
+                            }}
                             title="Dettagli JSON"
                             aria-label="Dettagli JSON"
                           >
@@ -1004,6 +1120,299 @@ export default function MicroserviceLogsCard({
               <pre className="whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
 {JSON.stringify(jsonDetail, null, 2)}
               </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedRow && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="flex w-full max-w-3xl flex-col rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div className="text-sm font-semibold text-slate-900">Dettagli Log</div>
+            </div>
+            <div className="max-h-[70vh] overflow-auto p-4">
+              <table className="w-full border-collapse text-xs">
+                <tbody>
+                  {!alertMode && Object.entries(selectedRow).map(([key, value]) => {
+                    // Skip internal fields
+                    if (key === "__live") return null;
+
+                    let displayValue: string;
+                    if (value === null || value === undefined) {
+                      displayValue = "-";
+                    } else if (typeof value === "object") {
+                      displayValue = JSON.stringify(value, null, 2);
+                    } else if (key === "timestamp" || key === "ts" || key === "time") {
+                      displayValue = formatDateTime(String(value), timeZone);
+                    } else {
+                      displayValue = String(value);
+                    }
+
+                    return (
+                      <tr key={key} className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">
+                          {key}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <div className="whitespace-pre-wrap break-words">
+                            {displayValue}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {alertMode && (
+                    <>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">Nome regola</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <input
+                            type="text"
+                            value={alertFormData.name}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, name: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                            placeholder="Es. Alert errors cachemanager"
+                          />
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">Attiva regola</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={alertFormData.enabled}
+                              onChange={(e) => setAlertFormData((prev) => ({ ...prev, enabled: e.target.checked }))}
+                              className="rounded border-slate-300"
+                            />
+                            <span className="text-xs">Enabled</span>
+                          </label>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">level</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <div className="flex flex-wrap gap-2">
+                            {levelOrder.map((lvl) => (
+                              <label key={lvl} className="inline-flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={alertFormData.levels.includes(lvl)}
+                                  onChange={(e) => {
+                                    setAlertFormData((prev) => ({
+                                      ...prev,
+                                      levels: e.target.checked
+                                        ? [...prev.levels, lvl]
+                                        : prev.levels.filter((l) => l !== lvl),
+                                    }));
+                                  }}
+                                  className="rounded border-slate-300"
+                                />
+                                <span className="text-xs capitalize">{lvl}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">microservice</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <select
+                            value={alertFormData.microservice}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, microservice: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                          >
+                            {serviceOptions.map((service) => (
+                              <option key={service} value={service}>
+                                {service}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">module</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <select
+                            value={alertFormData.module}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, module: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                          >
+                            <option value="">-</option>
+                            {moduleOptions.filter((m) => m !== "all").map((mod) => (
+                              <option key={mod} value={mod}>
+                                {mod}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">functionName</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <select
+                            value={alertFormData.functionName}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, functionName: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                          >
+                            <option value="">-</option>
+                            {functionOptions.filter((f) => f !== "all").map((fn) => (
+                              <option key={fn} value={fn}>
+                                {fn}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">message</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <textarea
+                            value={alertFormData.message}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, message: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                            rows={3}
+                          />
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100 bg-slate-50">
+                        <td className="px-3 py-3 font-semibold text-slate-900 align-top w-48" colSpan={2}>
+                          Actions
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">Channels</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <div className="flex flex-wrap gap-3">
+                            <label className="inline-flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={alertFormData.channelWhatsapp}
+                                onChange={(e) => setAlertFormData((prev) => ({ ...prev, channelWhatsapp: e.target.checked }))}
+                                className="rounded border-slate-300"
+                              />
+                              <span className="text-xs">Whatsapp</span>
+                            </label>
+                            <label className="inline-flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={alertFormData.channelEmail}
+                                onChange={(e) => setAlertFormData((prev) => ({ ...prev, channelEmail: e.target.checked }))}
+                                className="rounded border-slate-300"
+                              />
+                              <span className="text-xs">Email</span>
+                            </label>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">Email To</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <input
+                            type="text"
+                            value={alertFormData.emailTo}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, emailTo: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                            placeholder="destinatario email"
+                          />
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">Email Subject</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <input
+                            type="text"
+                            value={alertFormData.emailSubject}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, emailSubject: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                            placeholder="Oggetto alert"
+                          />
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-700 align-top w-48">Template</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <textarea
+                            value={alertFormData.template}
+                            onChange={(e) => setAlertFormData((prev) => ({ ...prev, template: e.target.value }))}
+                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                            rows={3}
+                            placeholder="Alert: {{message}}"
+                          />
+                          <div className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-2 text-[10px] text-slate-600">
+                            <div className="font-semibold text-slate-700">Template tags</div>
+                            <div className="mt-1 grid gap-x-3 gap-y-1 sm:grid-cols-2">
+                              <span>
+                                <span className="font-semibold text-slate-700">{"{{message}}"}</span> messaggio
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-700">{"{{time}}"}</span> timestamp
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-700">{"{{id}}"}</span> id log
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-700">{"{{level}}"}</span> livello
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-700">{"{{service}}"}</span> microservizio
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-700">{"{{module}}"}</span> modulo
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-700">{"{{function}}"}</span> funzione
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
+              <div className="flex items-center gap-2">
+                {!alertMode && (
+                  <BaseButton
+                    variant="solid"
+                    color="primary"
+                    size="sm"
+                    onClick={enableAlertMode}
+                  >
+                    Set as Alert
+                  </BaseButton>
+                )}
+                {alertMode && (
+                  <BaseButton
+                    variant="solid"
+                    color="primary"
+                    size="sm"
+                    onClick={handleSaveAlert}
+                    disabled={
+                      !alertFormData.name.trim() ||
+                      alertSaveStatus === "loading" ||
+                      (alertFormData.channelEmail && (!alertFormData.emailTo.trim() || !alertFormData.emailSubject.trim())) ||
+                      (!alertFormData.channelEmail && !alertFormData.channelWhatsapp)
+                    }
+                  >
+                    {alertSaveStatus === "loading" ? "Saving..." : "Save as Alert"}
+                  </BaseButton>
+                )}
+                {alertSaveError && (
+                  <span className="text-xs text-rose-600">{alertSaveError}</span>
+                )}
+              </div>
+              <BaseButton
+                variant="outline"
+                color="neutral"
+                size="sm"
+                onClick={closeRowDetail}
+              >
+                CLOSE
+              </BaseButton>
             </div>
           </div>
         </div>
