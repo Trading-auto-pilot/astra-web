@@ -85,6 +85,8 @@ export const getPermissionKey = (hash: string): string => {
   if (base === "dashboard") {
     const section = parts[1];
     if (section === "tickers") return "dashboard/tickers";
+    if (section === "user_tickers" || section === "user-tickers") return "dashboard/user_tickers";
+    if (section === "user-settings" || section === "user_settings") return "dashboard/user-settings";
     return "dashboard";
   }
 
@@ -95,6 +97,7 @@ export const getPermissionKey = (hash: string): string => {
     if (section === "api_key") return "admin/api_key";
     if (section === "logs") return "admin/logs";
     if (section === "microservice") return "admin/microservice";
+    if (section === "alerts") return "admin/alerts";
     return "admin";
   }
 
@@ -115,6 +118,8 @@ export const normalizeClientNavPage = (page: string): string => {
   if (cleaned === "overview") return "overview";
   if (cleaned === "dashboard/*" || cleaned === "dashboard") return "dashboard/*";
   if (cleaned === "dashboard/tickers") return "dashboard/tickers";
+  if (cleaned === "dashboard/user_tickers" || cleaned === "dashboard/user-tickers") return "dashboard/user_tickers";
+  if (cleaned === "dashboard/user-settings" || cleaned === "dashboard/user_settings") return "dashboard/user-settings";
   if (cleaned === "admin/*" || cleaned === "admin") return "admin/*";
   if (cleaned === "admin/users") return "admin/users";
   if (cleaned === "admin/scheduler") return "admin/scheduler";
@@ -123,6 +128,8 @@ export const normalizeClientNavPage = (page: string): string => {
 
   // Backward-compatible fallbacks
   if (cleaned === "tickers") return "dashboard/tickers";
+  if (cleaned === "user_tickers" || cleaned === "user-tickers") return "dashboard/user_tickers";
+  if (cleaned === "user-settings" || cleaned === "user_settings") return "dashboard/user-settings";
   if (cleaned === "users") return "admin/users";
   if (cleaned === "scheduler") return "admin/scheduler";
   if (cleaned === "microservice") return "admin/microservice";

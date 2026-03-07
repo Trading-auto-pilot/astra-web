@@ -632,6 +632,12 @@ export default function MicroserviceLogsCard({
         String(row.microservice || "").toLowerCase() ===
         String(effectiveService).toLowerCase()
       );
+    }).sort((a, b) => {
+      // Sort by timestamp DESC (most recent first)
+      const timeA = toUtcDate(a.timestamp ?? a.ts ?? a.time);
+      const timeB = toUtcDate(b.timestamp ?? b.ts ?? b.time);
+      if (!timeA || !timeB) return 0;
+      return timeB.getTime() - timeA.getTime();
     });
   }, [
     rows,

@@ -14,6 +14,8 @@ import {
   startTickerScan,
   startTickerScanForce,
   updateMarketDaily,
+  buildDailyRanking,
+  fetchDailyRanking,
   type TickerScanJob,
   type TickerScanJobHistory,
   type MarketDailyJob,
@@ -21,6 +23,7 @@ import {
   type UserDailyJob,
   type UserDailyScoreJob,
   type UserPipe,
+  type RankingDailyRow,
   fetchUserPipes,
   fetchTickerScanJobHistory,
   deleteTickerScanJobHistory,
@@ -104,6 +107,14 @@ export default function TickerScannerAdminPage() {
   const [userDailyPipe, setUserDailyPipe] = useState<string>("");
   const [pipes, setPipes] = useState<UserPipe[]>([]);
   const [userDailyVersion, setUserDailyVersion] = useState<string>("1.0");
+
+  // Ranking Daily state
+  const [showRankingModal, setShowRankingModal] = useState(false);
+  const [rankingDate, setRankingDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [rankingMode, setRankingMode] = useState<"normal" | "force">("normal");
+  const [rankingViewDate, setRankingViewDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [rankingRows, setRankingRows] = useState<RankingDailyRow[]>([]);
+  const [rankingStatus, setRankingStatus] = useState<Status>("idle");
 
   const loadJobs = useCallback(async () => {
     setStatus("loading");
@@ -211,6 +222,17 @@ export default function TickerScannerAdminPage() {
     return () => clearInterval(interval);
   }, [loadEndedUserDaily, userDailyTab]);
 
+  const loadRanking = useCallback(async (date: string) => {
+    setRankingStatus("loading");
+    try {
+      const rows = await fetchDailyRanking(date);
+      setRankingRows(rows);
+      setRankingStatus("idle");
+    } catch {
+      setRankingStatus("error");
+    }
+  }, []);
+
   useEffect(() => {
     fetchUserPipes()
       .then((list) => setPipes(list))
@@ -296,6 +318,16 @@ export default function TickerScannerAdminPage() {
               disabled={actionLoading !== null}
             >
               Update Market Daily
+            </BaseButton>
+            <BaseButton
+              variant="outline"
+              color="primary"
+              size="sm"
+              startIcon={<AppIcon icon="mdi:podium-gold" />}
+              onClick={() => setShowRankingModal(true)}
+              disabled={actionLoading !== null}
+            >
+              Ranking
             </BaseButton>
           </div>
         }
@@ -976,6 +1008,163 @@ export default function TickerScannerAdminPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ranking Daily */}
+      <SectionHeader title="Ranking Daily" subTitle="Snapshot di ranking giornaliero per bucket (LARGECAP, MIDCAP, SMALLCAP, ETF)" />
+      <div className="flex items-center gap-2">
+        <input
+          type="date"
+          className="rounded border border-slate-300 px-2 py-1 text-sm"
+          value={rankingViewDate}
+          onChange={(e) => setRankingViewDate(e.target.value)}
+        />
+        <BaseButton
+          variant="outline"
+          color="neutral"
+          size="sm"
+          startIcon={<AppIcon icon="mdi:magnify" />}
+          onClick={() => loadRanking(rankingViewDate)}
+          disabled={rankingStatus === "loading"}
+        >
+          Carica
+        </BaseButton>
+      </div>
+
+      {rankingStatus === "loading" && (
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
+          Caricamento ranking...
+        </div>
+      )}
+      {rankingStatus === "error" && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          Errore nel caricamento del ranking
+        </div>
+      )}
+      {rankingStatus === "idle" && rankingRows.length === 0 && (
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
+          Nessun dato. Seleziona una data e premi Carica, oppure calcola un ranking con il tasto Ranking.
+        </div>
+      )}
+      {rankingRows.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+            <div className="text-xs font-semibold text-slate-700">
+              Ranking {rankingViewDate} — {rankingRows.length} simboli
+            </div>
+          </div>
+          <div className="max-h-96 overflow-y-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Bucket</th>
+                  <th className="px-3 py-2 font-semibold text-right">#</th>
+                  <th className="px-3 py-2 font-semibold">Symbol</th>
+                  <th className="px-3 py-2 font-semibold">Type</th>
+                  <th className="px-3 py-2 font-semibold text-right">Score</th>
+                  <th className="px-3 py-2 font-semibold text-right">Quality</th>
+                  <th className="px-3 py-2 font-semibold text-right">Risk</th>
+                  <th className="px-3 py-2 font-semibold text-right">Momentum</th>
+                  <th className="px-3 py-2 font-semibold text-right">Price</th>
+                  <th className="px-3 py-2 font-semibold text-right">ATR%</th>
+                  <th className="px-3 py-2 font-semibold text-right">Vol$20d</th>
+                  <th className="px-3 py-2 font-semibold">SMA50</th>
+                  <th className="px-3 py-2 font-semibold">SMA200</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rankingRows.map((row) => {
+                  const reason = row.reason_json;
+                  const sma50ok = reason?.trend?.price_gt_sma50;
+                  const sma200ok = reason?.trend?.sma50_gt_sma200;
+                  const volM = reason?.dollar_vol_20d != null
+                    ? (Number(reason.dollar_vol_20d) / 1_000_000).toFixed(1) + "M"
+                    : "-";
+                  return (
+                    <tr key={row.id ?? `${row.symbol}-${row.bucket}-${row.rank_position}`} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-semibold text-slate-700">{row.bucket ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">{row.rank_position ?? "-"}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">{row.symbol ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-600">{row.asset_type ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{row.rank_score ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{reason?.quality_score ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{reason?.risk_score ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{reason?.momentum_score ?? "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{reason?.price != null ? Number(reason.price).toFixed(2) : "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {reason?.atr_14_pct != null ? (Number(reason.atr_14_pct) * 100).toFixed(2) + "%" : "-"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{volM}</td>
+                      <td className="px-3 py-2 text-center">
+                        {sma50ok == null ? "-" : sma50ok
+                          ? <span className="text-emerald-600 font-semibold">↑</span>
+                          : <span className="text-red-500">↓</span>}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {sma200ok == null ? "-" : sma200ok
+                          ? <span className="text-emerald-600 font-semibold">↑</span>
+                          : <span className="text-red-500">↓</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modal calcolo ranking */}
+      {showRankingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl">
+            <div className="text-sm font-semibold text-slate-900">Calcola Ranking Daily</div>
+            <div className="mt-2 text-xs text-slate-600">
+              Genera lo snapshot di ranking giornaliero dalla tabella <code>daily_scores</code>.
+            </div>
+            <div className="mt-3 flex flex-col gap-2 text-sm">
+              <label className="text-xs font-semibold text-slate-700">Data</label>
+              <input
+                type="date"
+                className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                value={rankingDate}
+                onChange={(e) => setRankingDate(e.target.value)}
+              />
+              <label className="text-xs font-semibold text-slate-700">Mode</label>
+              <select
+                className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                value={rankingMode}
+                onChange={(e) => setRankingMode(e.target.value as "normal" | "force")}
+              >
+                <option value="normal">Normal — salta se già calcolato</option>
+                <option value="force">Force — ricalcola anche se esiste</option>
+              </select>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <BaseButton variant="outline" color="neutral" size="sm" onClick={() => setShowRankingModal(false)}>
+                Annulla
+              </BaseButton>
+              <BaseButton
+                variant="solid"
+                color="primary"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await buildDailyRanking(rankingDate, rankingMode);
+                    setShowRankingModal(false);
+                    setRankingViewDate(rankingDate);
+                    setTimeout(() => loadRanking(rankingDate), 600);
+                    setActionStatus("Ranking calcolato");
+                  } catch (err: any) {
+                    setActionStatus(err?.message || "Errore calcolo ranking");
+                  }
+                }}
+              >
+                Calcola
+              </BaseButton>
             </div>
           </div>
         </div>

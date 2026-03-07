@@ -15,6 +15,12 @@ import IbkrBridgeMicroservicePage from "./microservices/IbkrBridgeMicroservicePa
 import IBKRKeepaliceMicroservicePage from "./microservices/IBKRKeepaliceMicroservicePage";
 import SchedulerMicroservicePage from "./microservices/SchedulerMicroservicePage";
 import IbkrgwMicroservicePage from "./microservices/IbkrgwMicroservicePage";
+import LiquidityManagerMicroservicePage from "./microservices/LiquidityManagerMicroservicePage";
+import ServiceControlPlaneMicroservicePage from "./microservices/ServiceControlPlaneMicroservicePage";
+import BrokerExecutorIbkrMicroservicePage from "./microservices/BrokerExecutorIbkrMicroservicePage";
+import DatahubMicroservicePage from "./microservices/DatahubMicroservicePage";
+import McpGatewayMicroservicePage from "./microservices/McpGatewayMicroservicePage";
+import CapitalManagerMicroservicePage from "./microservices/CapitalManagerMicroservicePage";
 
 type ReleaseInfo = {
   version?: string | null;
@@ -151,6 +157,65 @@ export default function AdminMicroserviceDetailPage() {
       case "ibkrgw":
         return (
           <IbkrgwMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+
+      case "liquidity-manager":
+        return (
+          <LiquidityManagerMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+      case "servicecontrolplane":
+        return (
+          <ServiceControlPlaneMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+
+      case "broker-executor-ibkr":
+        return (
+          <BrokerExecutorIbkrMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+
+      case "datahub":
+        return (
+          <DatahubMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+
+      case "mcp-gateway":
+        return (
+          <McpGatewayMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+
+      case "capital-manager":
+        return (
+          <CapitalManagerMicroservicePage
             onReleaseChange={setRelease}
             onHealthChange={setHealth}
             onOpenReleaseModal={() => setShowReleaseModal(true)}

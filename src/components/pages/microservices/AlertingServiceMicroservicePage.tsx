@@ -19,6 +19,8 @@ type Props = {
   onReleaseChange?: (rel: ReleaseInfo | null) => void;
   onHealthChange?: (health: Record<string, any> | null) => void;
   onOpenReleaseModal?: () => void;
+  initialTab?: "general" | "message" | "email" | "rules";
+  lockToTab?: "general" | "message" | "email" | "rules" | null;
 };
 
 type AlertingRule = {
@@ -37,6 +39,14 @@ type AlertingDelivery = {
   created_at?: string | null;
 };
 
+type EventCatalogEntry = {
+  service: string;
+  eventKey: string;
+  eventId?: string;
+  description?: string;
+  severity?: string;
+};
+
 /**
  * Componente per la gestione della pagina del microservizio AlertingService
  *
@@ -50,9 +60,11 @@ export default function AlertingServiceMicroservicePage({
   onReleaseChange,
   onHealthChange,
   onOpenReleaseModal,
+  initialTab = "general",
+  lockToTab = null,
 }: Props) {
   // Gestione tab attivo
-  const [activeTab, setActiveTab] = useState<"general" | "message" | "email" | "rules">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "message" | "email" | "rules">(initialTab);
 
   // Stato per il tab Message (WhatsApp)
   const [messageText, setMessageText] = useState("");
@@ -76,18 +88,28 @@ export default function AlertingServiceMicroservicePage({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingRule, setEditingRule] = useState<AlertingRule | null>(null);
   const [deleteRule, setDeleteRule] = useState<AlertingRule | null>(null);
+  const [isSavingRule, setIsSavingRule] = useState(false);
   const [newRuleName, setNewRuleName] = useState("");
   const [newRuleEnabled, setNewRuleEnabled] = useState(true);
   const [selectedLevels, setSelectedLevels] = useState<string[]>(["error"]);
   const [selectedService, setSelectedService] = useState<string>("any");
   const [messageGrep, setMessageGrep] = useState("");
+  const [matchSource, setMatchSource] = useState<"logs" | "events">("logs");
+  const [eventCatalogStatus, setEventCatalogStatus] = useState<Status>("idle");
+  const [eventCatalogError, setEventCatalogError] = useState<string | null>(null);
+  const [eventCatalog, setEventCatalog] = useState<EventCatalogEntry[]>([]);
+  const [eventCatalogFetched, setEventCatalogFetched] = useState(false);
+  const [selectedEventService, setSelectedEventService] = useState<string>("");
+  const [selectedEventKey, setSelectedEventKey] = useState<string>("");
   const [channelEmail, setChannelEmail] = useState(false);
   const [channelWhatsapp, setChannelWhatsapp] = useState(true);
   const [emailToValue, setEmailToValue] = useState("");
   const [emailSubjectValue, setEmailSubjectValue] = useState("");
   const [templateText, setTemplateText] = useState("Alert: {{message}}");
+  const [createRuleStep, setCreateRuleStep] = useState<"match" | "actions">("match");
 
   const levelOptions = ["trace", "debug", "info", "warning", "error"];
+  const alertManagerHelpUrl = `${env.helpBase}/docs/utente/servizi-a-supporto/alertmanager-creare-alert`;
   const serviceOptions = [
     "any",
     "alertingservice",
@@ -162,6 +184,119 @@ export default function AlertingServiceMicroservicePage({
     }
   }, [token]);
 
+  const fetchEventCatalog = useCallback(async () => {
+    setEventCatalogStatus("loading");
+    setEventCatalogError(null);
+    try {
+      const headers = {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+      let res = await fetch(`${env.apiBaseUrl}/alertingservice/events/catalog`, { headers });
+      if (res.status === 404) {
+        res = await fetch(`${env.apiBaseUrl}/events/catalog`, { headers });
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore caricamento catalogo eventi");
+      }
+
+      const normalized: EventCatalogEntry[] = [];
+      const seen = new Set<string>();
+      const parseJsonSafe = (value: any) => {
+        if (typeof value !== "string") return value;
+        try {
+          return JSON.parse(value);
+        } catch {
+          return value;
+        }
+      };
+      const extractServiceFromRedisKey = (key: unknown) => {
+        const raw = String(key || "");
+        if (!raw.startsWith("EVENTS:")) return "";
+        return raw.slice("EVENTS:".length).trim();
+      };
+      const pushEntry = (entry: any, forcedService?: string) => {
+        const service = String(
+          forcedService ||
+            entry?.service ||
+            entry?.microservice ||
+            entry?.serviceName ||
+            entry?.service_name ||
+            entry?.source ||
+            ""
+        ).trim();
+        const eventKey = String(entry?.eventKey || entry?.event_key || entry?.key || "").trim();
+        const eventId = String(entry?.eventId || entry?.event_id || entry?.id || "").trim();
+        const description = String(entry?.description || entry?.desc || "").trim();
+        const severity = String(entry?.severity || "").trim();
+        if (!service || !eventKey) return;
+        const uniqueKey = `${service}|${eventKey}`;
+        if (seen.has(uniqueKey)) return;
+        seen.add(uniqueKey);
+        normalized.push({
+          service,
+          eventKey,
+          eventId: eventId || undefined,
+          description: description || undefined,
+          severity: severity || undefined,
+        });
+      };
+      const walk = (node: any, inheritedService?: string) => {
+        const parsed = parseJsonSafe(node);
+        if (!parsed) return;
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item) => walk(item, inheritedService));
+          return;
+        }
+        if (typeof parsed !== "object") return;
+
+        const serviceFromKey = extractServiceFromRedisKey((parsed as any).key);
+        const serviceHint =
+          inheritedService ||
+          serviceFromKey ||
+          (parsed as any).service ||
+          (parsed as any).microservice ||
+          (parsed as any).serviceName ||
+          "";
+
+        if ((parsed as any).eventKey || (parsed as any).event_key) {
+          pushEntry(parsed, serviceHint);
+        }
+
+        const nestedCandidates = [
+          (parsed as any).items,
+          (parsed as any).catalog,
+          (parsed as any).events,
+          (parsed as any).manifest,
+          (parsed as any).value,
+          (parsed as any).data,
+          (parsed as any).payload,
+        ];
+        nestedCandidates.forEach((candidate) => walk(candidate, serviceHint));
+
+        Object.entries(parsed as Record<string, any>).forEach(([key, value]) => {
+          if (
+            ["items", "catalog", "events", "manifest", "value", "data", "payload"].includes(key)
+          ) {
+            return;
+          }
+          const nextService = extractServiceFromRedisKey(key) || serviceHint || key;
+          walk(value, nextService);
+        });
+      };
+
+      walk(data);
+      setEventCatalog(normalized);
+      setEventCatalogStatus("idle");
+      setEventCatalogFetched(true);
+    } catch (err: any) {
+      setEventCatalogStatus("error");
+      setEventCatalogError(err?.message || "Errore caricamento catalogo eventi");
+      setEventCatalog([]);
+      setEventCatalogFetched(true);
+    }
+  }, [token]);
+
   const handleReloadRules = useCallback(async () => {
     setRulesStatus("loading");
     setRulesError(null);
@@ -186,14 +321,29 @@ export default function AlertingServiceMicroservicePage({
   }, [fetchRules, fetchDeliveries, token]);
 
   const handleSaveRule = useCallback(async () => {
+    setIsSavingRule(true);
     setRulesStatus("loading");
     setRulesError(null);
     try {
-      const matchJson = {
-        levels: selectedLevels,
-        services: selectedService === "any" ? [] : [selectedService],
-        message_grep: messageGrep.trim(),
-      };
+      const selectedEvent = eventCatalog.find(
+        (entry) => entry.service === selectedEventService && entry.eventKey === selectedEventKey
+      );
+      const matchJson =
+        matchSource === "events"
+          ? {
+              source: "events",
+              event_service: selectedEventService,
+              event_key: selectedEventKey,
+              event_id: selectedEvent?.eventId || "",
+              description: selectedEvent?.description || "",
+              severity: selectedEvent?.severity || "",
+            }
+          : {
+              source: "logs",
+              levels: selectedLevels,
+              services: selectedService === "any" ? [] : [selectedService],
+              message_grep: messageGrep.trim(),
+            };
       const channels = [
         ...(channelWhatsapp ? ["whatsapp"] : []),
         ...(channelEmail ? ["email"] : []),
@@ -229,10 +379,13 @@ export default function AlertingServiceMicroservicePage({
       setShowCreateModal(false);
       setEditingRule(null);
       setNewRuleName("");
+      setCreateRuleStep("match");
       await handleReloadRules();
     } catch (err: any) {
       setRulesStatus("error");
       setRulesError(err?.message || "Errore salvataggio regola");
+    } finally {
+      setIsSavingRule(false);
     }
   }, [
     handleReloadRules,
@@ -241,6 +394,10 @@ export default function AlertingServiceMicroservicePage({
     selectedLevels,
     selectedService,
     messageGrep,
+    matchSource,
+    eventCatalog,
+    selectedEventService,
+    selectedEventKey,
     channelEmail,
     channelWhatsapp,
     templateText,
@@ -278,11 +435,16 @@ export default function AlertingServiceMicroservicePage({
 
   const openCreateModal = useCallback(() => {
     setEditingRule(null);
+    setCreateRuleStep("match");
     setNewRuleName("");
     setNewRuleEnabled(true);
+    setMatchSource("logs");
+    setEventCatalogFetched(false);
     setSelectedLevels(["error"]);
     setSelectedService("any");
     setMessageGrep("");
+    setSelectedEventService("");
+    setSelectedEventKey("");
     setChannelEmail(false);
     setChannelWhatsapp(true);
     setEmailToValue("");
@@ -297,18 +459,24 @@ export default function AlertingServiceMicroservicePage({
     const levels = Array.isArray(match.levels) && match.levels.length ? match.levels : ["error"];
     const services = Array.isArray(match.services) && match.services.length ? match.services : [];
     const channels = Array.isArray(actions.channels) ? actions.channels : [];
+    const isEventMatch = String(match.source || "").toLowerCase() === "events" || Boolean(match.event_key);
 
     setEditingRule(rule);
     setNewRuleName(rule.name || "");
     setNewRuleEnabled(Boolean(rule.enabled));
+    setMatchSource(isEventMatch ? "events" : "logs");
+    setEventCatalogFetched(false);
     setSelectedLevels(levels);
     setSelectedService(services[0] || "any");
     setMessageGrep(match.message_grep || "");
+    setSelectedEventService(match.event_service || "");
+    setSelectedEventKey(match.event_key || "");
     setChannelEmail(channels.includes("email"));
     setChannelWhatsapp(channels.includes("whatsapp"));
     setEmailToValue(actions.to || "");
     setEmailSubjectValue(actions.subject || "");
     setTemplateText(actions.template || "Alert: {{message}}");
+    setCreateRuleStep("match");
     setShowCreateModal(true);
   }, []);
 
@@ -339,12 +507,75 @@ export default function AlertingServiceMicroservicePage({
     return { dot: "bg-slate-300", label: "N/A" };
   };
 
+  const isCreateMatchStep = !editingRule && createRuleStep === "match";
+  const requireActionValidation = editingRule || (!editingRule && createRuleStep === "actions");
+  const eventServices = useMemo(
+    () => Array.from(new Set(eventCatalog.map((entry) => entry.service))).sort(),
+    [eventCatalog]
+  );
+  const eventOptions = useMemo(
+    () => eventCatalog.filter((entry) => entry.service === selectedEventService),
+    [eventCatalog, selectedEventService]
+  );
+  const selectedCatalogEvent = useMemo(
+    () => eventOptions.find((entry) => entry.eventKey === selectedEventKey) || eventOptions[0] || null,
+    [eventOptions, selectedEventKey]
+  );
+  const isRuleMatchConfigInvalid =
+    matchSource === "events" ? !selectedEventService || !selectedEventKey : selectedLevels.length === 0;
+  const isRuleActionConfigInvalid =
+    (channelEmail && (!emailToValue.trim() || !emailSubjectValue.trim())) ||
+    (!channelEmail && !channelWhatsapp);
+  const isCreateRuleDirectDisabled =
+    isSavingRule ||
+    !newRuleName.trim() ||
+    isRuleMatchConfigInvalid ||
+    isRuleActionConfigInvalid;
+  const isPrimaryRuleButtonDisabled =
+    isSavingRule ||
+    (!isCreateMatchStep &&
+      (!newRuleName.trim() ||
+        isRuleMatchConfigInvalid ||
+        (requireActionValidation && isRuleActionConfigInvalid)));
+
   useEffect(() => {
     if (activeTab === "rules") {
       fetchRules();
       fetchDeliveries();
     }
   }, [activeTab, fetchRules, fetchDeliveries]);
+
+  useEffect(() => {
+    if (lockToTab && activeTab !== lockToTab) {
+      setActiveTab(lockToTab);
+    }
+  }, [activeTab, lockToTab]);
+
+  useEffect(() => {
+    if (
+      showCreateModal &&
+      matchSource === "events" &&
+      !eventCatalogFetched &&
+      eventCatalogStatus !== "loading"
+    ) {
+      fetchEventCatalog();
+    }
+  }, [showCreateModal, matchSource, eventCatalogFetched, eventCatalogStatus, fetchEventCatalog]);
+
+  useEffect(() => {
+    if (matchSource !== "events" || !eventCatalog.length) return;
+    if (!selectedEventService || !eventServices.includes(selectedEventService)) {
+      setSelectedEventService(eventServices[0] || "");
+      return;
+    }
+    if (!eventOptions.length) {
+      setSelectedEventKey("");
+      return;
+    }
+    if (!selectedEventKey || !eventOptions.some((entry) => entry.eventKey === selectedEventKey)) {
+      setSelectedEventKey(eventOptions[0].eventKey);
+    }
+  }, [matchSource, eventCatalog.length, eventServices, selectedEventService, eventOptions, selectedEventKey]);
 
   /**
    * Invia un messaggio WhatsApp di test tramite l'endpoint /alertingservice/whatsapp/send
@@ -409,7 +640,8 @@ export default function AlertingServiceMicroservicePage({
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* BARRA DEI TAB */}
-      <div className="flex gap-6 border-b border-slate-200">
+      {!lockToTab && (
+        <div className="flex gap-6 border-b border-slate-200">
         {/* Tab General Settings */}
         <button
           type="button"
@@ -453,7 +685,8 @@ export default function AlertingServiceMicroservicePage({
         >
           Rule Engine
         </button>
-      </div>
+        </div>
+      )}
 
       {/* CONTENUTO DEI TAB */}
 
@@ -605,6 +838,15 @@ export default function AlertingServiceMicroservicePage({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                title="Apri guida creazione alert"
+                aria-label="Apri guida creazione alert"
+                onClick={() => window.open(alertManagerHelpUrl, "_blank", "noopener,noreferrer")}
+              >
+                <AppIcon icon="mdi:help-circle-outline" className="h-4 w-4" />
+              </button>
               <button
                 type="button"
                 className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
@@ -777,56 +1019,193 @@ export default function AlertingServiceMicroservicePage({
               </label>
             </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="text-[11px] font-semibold text-slate-700">Match</div>
-                <div>
-                  <div className="text-[10px] font-semibold text-slate-500">Levels</div>
-                  <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-600">
-                    {levelOptions.map((lvl) => (
-                      <label key={lvl} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedLevels.includes(lvl)}
-                          onChange={(event) => {
-                            setSelectedLevels((prev) =>
-                              event.target.checked
-                                ? Array.from(new Set([...prev, lvl]))
-                                : prev.filter((item) => item !== lvl)
-                            );
-                          }}
-                        />
-                        {lvl}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <label className="text-[10px] font-semibold text-slate-500">
-                  Service
-                  <select
-                    className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700"
-                    value={selectedService}
-                    onChange={(event) => setSelectedService(event.target.value)}
+            {!editingRule && (
+              <div className="mt-4 flex items-center gap-2 text-[10px] font-semibold">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full border ${
+                      createRuleStep === "match"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-500"
+                    }`}
                   >
-                    {serviceOptions.map((service) => (
-                      <option key={service} value={service}>
-                        {service === "any" ? "Qualsiasi" : service}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-[10px] font-semibold text-slate-500">
-                  Message (fuzzy search)
-                  <input
-                    className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700"
-                    value={messageGrep}
-                    onChange={(event) => setMessageGrep(event.target.value)}
-                    placeholder="Es. timeout, error, failed..."
-                  />
-                </label>
+                    1
+                  </span>
+                  <span className={createRuleStep === "match" ? "text-slate-900" : "text-slate-500"}>
+                    Match
+                  </span>
+                </div>
+                <span className="h-px w-8 bg-slate-300" />
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full border ${
+                      createRuleStep === "actions"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-500"
+                    }`}
+                  >
+                    2
+                  </span>
+                  <span className={createRuleStep === "actions" ? "text-slate-900" : "text-slate-500"}>
+                    Actions
+                  </span>
+                </div>
               </div>
+            )}
 
-              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className={`mt-4 grid min-h-[430px] gap-4 ${editingRule ? "md:grid-cols-2" : ""}`}>
+              {(editingRule || createRuleStep === "match") && (
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-[11px] font-semibold text-slate-700">Match</div>
+                  <div className="inline-flex rounded-md border border-slate-200 bg-white p-1">
+                    <button
+                      type="button"
+                      className={`rounded px-3 py-1 text-[10px] font-semibold ${
+                        matchSource === "logs"
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                      onClick={() => setMatchSource("logs")}
+                    >
+                      Logs
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded px-3 py-1 text-[10px] font-semibold ${
+                        matchSource === "events"
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                      onClick={() => setMatchSource("events")}
+                    >
+                      Eventi
+                    </button>
+                  </div>
+
+                  {matchSource === "logs" ? (
+                    <>
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-500">Levels</div>
+                        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-600">
+                          {levelOptions.map((lvl) => (
+                            <label key={lvl} className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={selectedLevels.includes(lvl)}
+                                onChange={(event) => {
+                                  setSelectedLevels((prev) =>
+                                    event.target.checked
+                                      ? Array.from(new Set([...prev, lvl]))
+                                      : prev.filter((item) => item !== lvl)
+                                  );
+                                }}
+                              />
+                              {lvl}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <label className="text-[10px] font-semibold text-slate-500">
+                        Service
+                        <select
+                          className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700"
+                          value={selectedService}
+                          onChange={(event) => setSelectedService(event.target.value)}
+                        >
+                          {serviceOptions.map((service) => (
+                            <option key={service} value={service}>
+                              {service === "any" ? "Qualsiasi" : service}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-[10px] font-semibold text-slate-500">
+                        Message (fuzzy search)
+                        <input
+                          className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700"
+                          value={messageGrep}
+                          onChange={(event) => setMessageGrep(event.target.value)}
+                          placeholder="Es. timeout, error, failed..."
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <div className="space-y-3 pt-2">
+                      <label className="text-[10px] font-semibold text-slate-500">
+                        Microservizio evento
+                        <select
+                          className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700"
+                          value={selectedEventService}
+                          onChange={(event) => {
+                            setSelectedEventService(event.target.value);
+                            setSelectedEventKey("");
+                          }}
+                          disabled={eventCatalogStatus === "loading"}
+                        >
+                          <option value="">
+                            {eventCatalogStatus === "loading" ? "Caricamento catalogo..." : "Seleziona"}
+                          </option>
+                          {eventServices.map((service) => (
+                            <option key={service} value={service}>
+                              {service}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-[10px] font-semibold text-slate-500">
+                        Evento
+                        <select
+                          className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700"
+                          value={selectedEventKey}
+                          onChange={(event) => setSelectedEventKey(event.target.value)}
+                          disabled={!selectedEventService || eventCatalogStatus === "loading"}
+                        >
+                          <option value="">Seleziona evento</option>
+                          {eventOptions.map((eventEntry) => (
+                            <option key={eventEntry.eventKey} value={eventEntry.eventKey}>
+                              {eventEntry.eventId || eventEntry.eventKey}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-[10px] font-semibold text-slate-500">
+                        Description
+                        <input
+                          className="mt-1 w-full rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-[11px] text-slate-700"
+                          value={selectedCatalogEvent?.description || "-"}
+                          readOnly
+                        />
+                      </label>
+                      <label className="text-[10px] font-semibold text-slate-500">
+                        Severity
+                        <input
+                          className="mt-1 w-full rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-[11px] text-slate-700"
+                          value={selectedCatalogEvent?.severity || "-"}
+                          readOnly
+                        />
+                      </label>
+                      {eventCatalogError && (
+                        <div className="flex items-center justify-between gap-2 text-[10px] text-rose-600">
+                          <span>{eventCatalogError}</span>
+                          <button
+                            type="button"
+                            className="rounded border border-rose-200 px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"
+                            onClick={() => {
+                              setEventCatalogFetched(false);
+                              fetchEventCatalog();
+                            }}
+                          >
+                            Riprova
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(editingRule || createRuleStep === "actions") && (
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="text-[11px] font-semibold text-slate-700">Actions</div>
                 <div>
                 <div className="text-[10px] font-semibold text-slate-500">Channels</div>
@@ -904,34 +1283,53 @@ export default function AlertingServiceMicroservicePage({
                     </span>
                   </div>
                 </div>
-              </div>
+                </div>
+              )}
             </div>
 
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                onClick={() => setShowCreateModal(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                onClick={handleSaveRule}
-                disabled={
-                  !newRuleName.trim() ||
-                  rulesStatus === "loading" ||
-                  (channelEmail && (!emailToValue.trim() || !emailSubjectValue.trim())) ||
-                  (!channelEmail && !channelWhatsapp)
-                }
-              >
-                {rulesStatus === "loading"
-                  ? "Salvataggio..."
-                  : editingRule
-                    ? "Salva modifiche"
-                    : "Crea regola"}
-              </button>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => setShowCreateModal(false)}
+                >
+                  Cancel
+                </button>
+                {!editingRule && createRuleStep === "actions" && (
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => setCreateRuleStep("match")}
+                  >
+                    Previous
+                  </button>
+                )}
+                {!editingRule && createRuleStep === "match" && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                    onClick={() => setCreateRuleStep("actions")}
+                    disabled={isSavingRule}
+                  >
+                    NEXT
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  onClick={handleSaveRule}
+                  disabled={editingRule ? isPrimaryRuleButtonDisabled : isCreateRuleDirectDisabled}
+                >
+                  {isSavingRule
+                    ? "Salvataggio..."
+                    : editingRule
+                      ? "Salva modifiche"
+                      : "Crea regola"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -251,7 +251,10 @@ export function SchedulerPage() {
     };
   }, []);
 
-  const rows = useMemo(() => jobs, [jobs, lastRunsByJobKey]);
+  const rows = useMemo(
+    () => [...jobs].sort((a, b) => (a.jobKey ?? "").localeCompare(b.jobKey ?? "")),
+    [jobs, lastRunsByJobKey]
+  );
 
   const seedDraftFromJob = (job: SchedulerJob) => {
     setEditingDraft({ ...job });

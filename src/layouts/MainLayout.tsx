@@ -65,7 +65,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     }
 
     if (page === "admin/*" || page === "admin") {
-      ["users", "api_key", "logs", "scheduler", "microservice"].forEach((segment) => {
+      ["users", "api_key", "logs", "alerts", "scheduler", "microservice"].forEach((segment) => {
         const href = `#/admin/${segment}`;
         const label =
           segment === "api_key"
@@ -102,7 +102,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
   }
 
   if (adminChildren.length) {
-    const order = { users: 0, api_key: 1, logs: 2, scheduler: 3, microservice: 4 } as Record<string, number>;
+    const order = { users: 0, api_key: 1, logs: 2, alerts: 3, scheduler: 4, microservice: 5 } as Record<string, number>;
     adminChildren.sort((a, b) => {
       const aKey = String(a.href || "").replace(/^#\/admin\//, "");
       const bKey = String(b.href || "").replace(/^#\/admin\//, "");
@@ -143,6 +143,12 @@ export function MainLayout({
   const [showGwModal, setShowGwModal] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedAccountType, setSelectedAccountType] = useState<string | null>(null);
+  const releaseSlug = release?.version
+    ? `release-${String(release.version).trim().replace(/\./g, "-")}`
+    : null;
+  const releaseNotesUrl = releaseSlug
+    ? `${env.helpBase}/docs/release-notes/${releaseSlug}`
+    : `${env.helpBase}/docs/release-notes/overview`;
 
   const statusIndicatorTone =
     gwStatus === "READY"
@@ -430,6 +436,7 @@ export function MainLayout({
                         if (label === "Users") return "mdi:account-group";
                         if (label === "API Key") return "mdi:key-variant";
                         if (label === "Logs") return "mdi:text-box-outline";
+                        if (label === "Alerts") return "mdi:alert-outline";
                         if (label === "Scheduler") return "mdi:clock-outline";
                         if (label === "Tickers") return "mdi:chart-line";
                         if (label === "User Tickers") return "mdi:account-star";
@@ -604,6 +611,14 @@ export function MainLayout({
                 </div>
               </div>
               <div className="flex gap-2">
+                <BaseButton
+                  variant="outline"
+                  color="primary"
+                  size="sm"
+                  onClick={() => window.open(releaseNotesUrl, "_blank", "noopener,noreferrer")}
+                >
+                  Leggi Release notes
+                </BaseButton>
                 <BaseButton
                   variant="outline"
                   color="neutral"

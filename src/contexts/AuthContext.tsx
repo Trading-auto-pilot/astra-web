@@ -65,6 +65,22 @@ const normalizeAllowedPages = (rawPages: string[]): string[] => {
   // Wildcard support: dashboard/* enables all dashboard pages.
   if (normalized.includes("dashboard/*") || normalized.includes("dashboard")) {
     if (!expanded.includes("dashboard/tickers")) expanded.push("dashboard/tickers");
+    if (!expanded.includes("dashboard/user_tickers")) expanded.push("dashboard/user_tickers");
+    if (!expanded.includes("dashboard/user-settings")) expanded.push("dashboard/user-settings");
+  }
+
+  // Alias normalization for dashboard pages.
+  if (expanded.includes("dashboard/user-tickers") && !expanded.includes("dashboard/user_tickers")) {
+    expanded.push("dashboard/user_tickers");
+  }
+  if (expanded.includes("dashboard/user_tickers") && !expanded.includes("dashboard/user-tickers")) {
+    expanded.push("dashboard/user-tickers");
+  }
+  if (expanded.includes("dashboard/user_settings") && !expanded.includes("dashboard/user-settings")) {
+    expanded.push("dashboard/user-settings");
+  }
+  if (expanded.includes("dashboard/user-settings") && !expanded.includes("dashboard/user_settings")) {
+    expanded.push("dashboard/user_settings");
   }
 
   if (normalized.includes("admin/*") || normalized.includes("admin")) {
@@ -73,6 +89,7 @@ const normalizeAllowedPages = (rawPages: string[]): string[] => {
     if (!expanded.includes("admin/api_key")) expanded.push("admin/api_key");
     if (!expanded.includes("admin/logs")) expanded.push("admin/logs");
     if (!expanded.includes("admin/microservice")) expanded.push("admin/microservice");
+    if (!expanded.includes("admin/alerts")) expanded.push("admin/alerts");
   }
 
   // Always allow Overview as safe fallback.
