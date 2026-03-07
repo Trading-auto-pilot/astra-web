@@ -1,11 +1,13 @@
 import DashboardLayout from "../../layouts/DashboardLayout";
 import SectionHeader from "../molecules/content/SectionHeader";
+import AccountCapacityBar from "../molecules/AccountCapacityBar";
 import TickersPage from "./TickersPage";
 import UserTickersPage from "./UserTickersPage";
 import UsersPage from "./UsersPage";
 import SchedulerPage from "./SchedulerPage";
 import ApiKeysPage from "./ApiKeysPage";
 import LogsPage from "./LogsPage";
+import AlertsPage from "./AlertsPage";
 import AdminMicroservicePage from "./AdminMicroservicePage";
 import AdminMicroserviceDetailPage from "./AdminMicroserviceDetailPage";
 import UserSettingsPage from "./UserSettingsPage";
@@ -31,6 +33,7 @@ type AppSection =
   | "scheduler"
   | "apiKeys"
   | "logs"
+  | "alerts"
   | "microservice"
   | "userSettings";
 
@@ -53,6 +56,7 @@ const getAppSection = (): AppSection => {
     if (parts[1] === "scheduler") return "scheduler";
     if (parts[1] === "api_key") return "apiKeys";
     if (parts[1] === "logs") return "logs";
+    if (parts[1] === "alerts") return "alerts";
     if (parts[1] === "microservice") return "microservice";
     return "overview";
   }
@@ -71,6 +75,20 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [wsHealth, setWsHealth] = useState(() => redisWsBridgeClient.getHealth());
   const [wsLogs, setWsLogs] = useState(() => redisWsBridgeClient.getLogs());
+  const [openOrders, setOpenOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [capitalLimits, setCapitalLimits] = useState<Record<string, number | null> | null>(null);
+  const [capitalConfig, setCapitalConfig] = useState<Record<string, number> | null>(null);
+  const [liquidityData, setLiquidityData] = useState<{
+    score: number;
+    riskRegime: string;
+    volatility: number | string;
+    confidence: number;
+    market?: string;
+    ts?: string;
+  } | null>(null);
+  const [liquidityStatus, setLiquidityStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [liquidityError, setLiquidityError] = useState<string | null>(null);
 
   useEffect(() => {
     const syncSection = () => setSection(getAppSection());
@@ -189,10 +207,70 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     }
   };
 
+  const fetchOpenOrders = async () => {
+    setLoadingOrders(true);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${env.apiBaseUrl}/broker-executor-ibkr/orders`, {
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      const orders = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+      setOpenOrders(orders);
+    } catch {
+      setOpenOrders([]);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  const fetchCapitalData = async () => {
+    const token = getAuthToken();
+    const h = { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+    const [limitsRes, configRes] = await Promise.allSettled([
+      fetch(`${env.apiBaseUrl}/capital-manager/allocation/limits`, { headers: h }),
+      fetch(`${env.apiBaseUrl}/capital-manager/allocation/config`, { headers: h }),
+    ]);
+    if (limitsRes.status === "fulfilled" && limitsRes.value.ok) {
+      const d = await limitsRes.value.json().catch(() => ({}));
+      setCapitalLimits(d?.data ?? d);
+    }
+    if (configRes.status === "fulfilled" && configRes.value.ok) {
+      const d = await configRes.value.json().catch(() => ({}));
+      setCapitalConfig(d?.config ?? d);
+    }
+  };
+
+  const loadLiquidityData = async () => {
+    setLiquidityStatus("loading");
+    setLiquidityError(null);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${env.apiBaseUrl}/liquidity-manager/liquidity-score`, {
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error?.message || data?.error || "Errore caricamento liquidità");
+      const payload = data?.score != null ? data : (data?.data ?? data);
+      setLiquidityData(payload);
+      setLiquidityStatus("idle");
+    } catch (err: any) {
+      setLiquidityStatus("error");
+      setLiquidityError(err?.message || "Errore caricamento liquidità");
+    }
+  };
+
   useEffect(() => {
     if (!selectedAccountId || section !== "overview") return;
     fetchAccountDetails(selectedAccountId);
+    fetchOpenOrders();
   }, [selectedAccountId, section]);
+
+  useEffect(() => {
+    if (section !== "overview") return;
+    fetchCapitalData();
+    loadLiquidityData();
+  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     redisWsBridgeClient.start();
@@ -249,6 +327,14 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     return (
       <DashboardLayout userName={userName} navEntries={navEntries}>
         <LogsPage />
+      </DashboardLayout>
+    );
+  }
+
+  if (section === "alerts") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <AlertsPage />
       </DashboardLayout>
     );
   }
@@ -441,71 +527,242 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <SectionHeader title="Dettagli account" subTitle="Summary e performance" />
-          {loadingDetails ? (
-            <div className="text-sm text-slate-500">Caricamento dettagli...</div>
-          ) : detailsError ? (
-            <div className="text-sm text-amber-600">{detailsError}</div>
-          ) : accountDetails ? (
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="text-sm font-semibold text-slate-900">Summary</div>
-              <table className="mt-3 w-full text-[11px] text-slate-700">
-                <tbody>
-                  {(() => {
-                    const summary = accountDetails?.summary ?? {};
-                    const accruedCash = summary.accruedcash ?? {};
-                    const availableFunds = accruedCash?.availablefunds ?? summary?.availablefunds ?? {};
-                    const netLiquidation = summary?.netliquidation ?? accruedCash?.netliquidation ?? {};
-                    const formatAmount = (value: unknown) => {
-                      const numeric = typeof value === "number" ? value : Number(value);
-                      if (!Number.isFinite(numeric)) return "-";
-                      return numeric.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      });
-                    };
-                    const rows = [
-                      {
-                        label: "Cash",
-                        amount: accruedCash?.amount,
-                        currency: accruedCash?.currency,
-                      },
-                      {
-                        label: "Available funds",
-                        amount: availableFunds?.amount,
-                        currency: availableFunds?.currency ?? accruedCash?.currency,
-                      },
-                      {
-                        label: "Net liquidation",
-                        amount: netLiquidation?.amount,
-                        currency: netLiquidation?.currency ?? accruedCash?.currency,
-                      },
-                    ];
+        {/* ── Account Summary ─────────────────────────────────────────────── */}
+        {(() => {
+          const getAmt = (field: any): number => {
+            if (field == null) return 0;
+            if (typeof field === "number") return field;
+            return typeof field?.amount === "number" ? field.amount : 0;
+          };
+          const fmtUSD = (v: number) =>
+            v.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
 
-                    return rows.map((row) => (
-                      <tr key={row.label}>
-                        <td className="pr-2 font-semibold text-slate-600">{row.label}</td>
-                        <td className="text-right text-slate-800">
-                          {row.amount === null || row.amount === undefined || row.amount === ""
-                            ? "-"
-                            : formatAmount(row.amount)}
-                        </td>
-                        <td className="pl-3 text-right text-slate-500">
-                          {row.currency === null || row.currency === undefined || row.currency === ""
-                            ? "-"
-                            : String(row.currency)}
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
+          const summary = accountDetails?.summary ?? null;
+
+          const netLiquidation     = summary ? (getAmt(summary.equitywithloanvalue) || getAmt(summary.netliquidation)) : 0;
+          const totalCashValue     = summary ? getAmt(summary.totalcashvalue) : 0;
+          const grossPositionValue = summary ? (getAmt(summary.grosspositionvalue) || undefined) : undefined;
+          const availableFunds     = summary ? getAmt(summary.availablefunds) : 0;
+          const activeOrdersCash   = openOrders.reduce((sum: number, o: any) =>
+            sum + Number(o.limitPrice ?? 0) * Number(o.quantity ?? 0), 0);
+          const residualCash       = Math.max(totalCashValue - activeOrdersCash, 0);
+
+          const maxInv = capitalLimits?.MAX_INVESTMENT ?? null;
+          const statCards = [
+            {
+              label: "Liquidità netta",
+              sublabel: "equityWithLoanValue",
+              value: netLiquidation > 0 ? fmtUSD(netLiquidation) : null,
+              desc: "Valore totale se tutte le posizioni venissero liquidate oggi",
+              color: "text-blue-600",
+            },
+            {
+              label: "Liquidità",
+              sublabel: "totalCashValue",
+              value: totalCashValue > 0 ? fmtUSD(totalCashValue) : null,
+              desc: "Cache disponibile per investimenti (esclude posizioni aperte)",
+              color: "text-blue-500",
+            },
+            {
+              label: "Ordini attivi",
+              sublabel: `${openOrders.length} ordini`,
+              value: activeOrdersCash > 0 ? fmtUSD(activeOrdersCash) : openOrders.length > 0 ? String(openOrders.length) : null,
+              desc: "Notional riservato dagli ordini attivi correnti",
+              color: "text-violet-600",
+            },
+            {
+              label: "Cash rimanente",
+              sublabel: "totalCashValue − ordini attivi",
+              value: totalCashValue > 0 ? fmtUSD(residualCash) : null,
+              desc: "Liquidità disponibile per nuovi ordini",
+              color: "text-emerald-600",
+            },
+            {
+              label: "Max Investment",
+              sublabel: "capital-manager",
+              value: maxInv != null ? fmtUSD(maxInv) : null,
+              desc: "Capitale massimo configurato per investimenti (capital-manager)",
+              color: "text-amber-600",
+            },
+          ];
+
+          return (
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Account Summary</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    {selectedAccountId ?? "Seleziona un account per vedere i dettagli"}
+                  </div>
+                </div>
+                {selectedAccountId && (
+                  <button
+                    type="button"
+                    onClick={() => { fetchAccountDetails(selectedAccountId); fetchOpenOrders(); }}
+                    disabled={loadingDetails || loadingOrders}
+                    className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    {loadingDetails || loadingOrders ? "Loading..." : "Refresh"}
+                  </button>
+                )}
+              </div>
+
+              {detailsError && (
+                <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">{detailsError}</div>
+              )}
+
+              {loadingDetails ? (
+                <div className="text-[11px] text-slate-400">Caricamento dettagli...</div>
+              ) : !accountDetails ? (
+                <div className="text-[11px] text-slate-400">Seleziona un account dalla lista sopra per vedere i dettagli.</div>
+              ) : (
+                <>
+                  {/* Stats cards */}
+                  <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                    {statCards.map(({ label, sublabel, value, desc, color }) => (
+                      <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+                        <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+                        <div className={`mt-1 text-[15px] font-bold tabular-nums ${value ? color : "text-slate-300"}`}>
+                          {value ?? "–"}
+                        </div>
+                        <div className="mt-0.5 text-[9px] text-slate-400">{sublabel}</div>
+                        <div className="mt-1 text-[8px] leading-relaxed text-slate-300">{desc}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Capacity bar */}
+                  {netLiquidation > 0 && (
+                    <AccountCapacityBar
+                      netLiquidation={netLiquidation}
+                      totalCashValue={totalCashValue}
+                      grossPositionValue={grossPositionValue}
+                      availableFunds={availableFunds}
+                      activeOrdersCash={activeOrdersCash}
+                      maxInvestment={capitalLimits?.MAX_INVESTMENT ?? undefined}
+                    />
+                  )}
+                </>
+              )}
             </div>
-          ) : (
-            <div className="text-sm text-slate-500">Seleziona un account per vedere i dettagli.</div>
-          )}
-        </div>
+          );
+        })()}
+
+        {/* ── Liquidity Manager ─────────────────────────────────────────── */}
+        {(() => {
+          const ld = liquidityData;
+          const regimeColor =
+            ld?.riskRegime === "OFF" || ld?.riskRegime === "RISK_OFF"
+              ? "text-rose-600"
+              : ld?.riskRegime === "ON" || ld?.riskRegime === "RISK_ON"
+                ? "text-emerald-600"
+                : "text-amber-500";
+          const scoreTone =
+            !ld ? "text-slate-300"
+            : ld.score >= 70 ? "text-emerald-600"
+            : ld.score >= 40 ? "text-amber-500"
+            : "text-rose-600";
+
+          return (
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Liquidity Manager</div>
+                  <div className="mt-0.5 text-[10px] text-slate-400">
+                    Score alto = più investimento · Score basso = più cash riservata
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadLiquidityData}
+                  disabled={liquidityStatus === "loading"}
+                  className="inline-flex shrink-0 items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {liquidityStatus === "loading" ? "Loading..." : "Load"}
+                </button>
+              </div>
+
+              {liquidityError && (
+                <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{liquidityError}</div>
+              )}
+
+              {!ld && liquidityStatus === "idle" && (
+                <div className="text-[11px] text-slate-400">Premi "Load" per recuperare i dati dal Liquidity Manager.</div>
+              )}
+
+              {ld && (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {/* Score */}
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Score</div>
+                    <div className={`mt-1 text-[22px] font-bold tabular-nums leading-none ${scoreTone}`}>
+                      {ld.score?.toFixed(1) ?? "–"}
+                    </div>
+                    <div className="mt-1 text-[9px] text-slate-400">0 = pessimo · 100 = ottimo</div>
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          ld.score >= 70 ? "bg-emerald-500" : ld.score >= 40 ? "bg-amber-400" : "bg-rose-500"
+                        }`}
+                        style={{ width: `${Math.max(0, Math.min(100, ld.score ?? 0))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Risk Regime */}
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Risk Regime</div>
+                    <div className={`mt-1 text-[15px] font-bold leading-tight ${regimeColor}`}>
+                      {ld.riskRegime ?? "–"}
+                    </div>
+                    <div className="mt-1 text-[9px] text-slate-400">
+                      {ld.riskRegime === "OFF" || ld.riskRegime === "RISK_OFF"
+                        ? `Aggiunge +${capitalConfig?.RISK_OFF_ADD_PCT != null ? (capitalConfig.RISK_OFF_ADD_PCT * 100).toFixed(0) : "?"}% alla riserva`
+                        : "Nessun aggiustamento risk-off"}
+                    </div>
+                  </div>
+
+                  {/* Volatility */}
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Volatility</div>
+                    <div className="mt-1 text-[15px] font-bold tabular-nums text-slate-800">
+                      {ld.volatility == null
+                        ? "–"
+                        : typeof ld.volatility === "number"
+                          ? ld.volatility.toFixed(2)
+                          : String(ld.volatility)}
+                    </div>
+                    <div className="mt-1 text-[9px] text-slate-400">
+                      {typeof ld.volatility === "number"
+                        ? `vol / ${capitalConfig?.VOL_SCALE ?? "?"} → cash adj`
+                        : "regime qualitativo"}
+                    </div>
+                  </div>
+
+                  {/* Confidence */}
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Confidence</div>
+                    <div className={`mt-1 text-[15px] font-bold tabular-nums ${
+                      ld.confidence >= 0.75 ? "text-emerald-600"
+                      : ld.confidence >= 0.50 ? "text-amber-500"
+                      : ld.confidence >= 0.25 ? "text-orange-500"
+                      : "text-rose-600"
+                    }`}>
+                      {ld.confidence?.toFixed(2) ?? "–"}
+                    </div>
+                    <div className="mt-1 text-[9px] text-slate-400">
+                      soglia: {capitalConfig?.CONFIDENCE_THRESHOLD ?? "–"} · {
+                        ld.confidence >= (capitalConfig?.CONFIDENCE_THRESHOLD ?? 0.69)
+                          ? "usa score"
+                          : `usa fallback ${capitalConfig?.FALLBACK_RESERVED_CASH_PCT != null ? (capitalConfig.FALLBACK_RESERVED_CASH_PCT * 100).toFixed(0) + "%" : ""}`
+                      }
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </DashboardLayout>
   );

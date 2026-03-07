@@ -30,7 +30,7 @@ export type TickerScanJobHistory = {
 };
 
 export async function fetchTickerScanJobs(signal?: AbortSignal): Promise<TickerScanJob[]> {
-  const data = await httpClient<any>("/tickerscanner/scan/jobs", { method: "GET", signal });
+  const data = await httpClient<any>("/tickerscanner/universe/scan/jobs", { method: "GET", signal });
   if (Array.isArray(data?.jobs)) return data.jobs as TickerScanJob[];
   if (Array.isArray(data)) return data as TickerScanJob[];
   return [];
@@ -38,6 +38,7 @@ export async function fetchTickerScanJobs(signal?: AbortSignal): Promise<TickerS
 
 export async function fetchTickerScanJobHistory(limit = 20): Promise<TickerScanJobHistory[]> {
   const data = await http.get<any>(`/tickerscanner/fundamentals/ticker-scan-jobs?limit=${encodeURIComponent(String(limit))}`);
+  if (Array.isArray(data?.items)) return data.items as TickerScanJobHistory[];
   if (Array.isArray(data?.data)) return data.data as TickerScanJobHistory[];
   if (Array.isArray(data)) return data as TickerScanJobHistory[];
   return [];
@@ -48,11 +49,11 @@ export async function deleteTickerScanJobHistory(id: number): Promise<unknown> {
 }
 
 export async function startTickerScan(): Promise<unknown> {
-  return http.get("/tickerscanner/scan");
+  return http.post("/tickerscanner/universe/scan");
 }
 
 export async function startTickerScanForce(): Promise<unknown> {
-  return http.get("/tickerscanner/scan/force");
+  return http.post("/tickerscanner/universe/scan/force");
 }
 
 export async function refreshTickerMomentum(): Promise<unknown> {
@@ -104,6 +105,7 @@ export type MarketDailyJobHistory = {
 
 export async function fetchMarketDailyJobHistory(limit = 20): Promise<MarketDailyJobHistory[]> {
   const data = await http.get<any>(`/tickerscanner/fundamentals/market-daily-jobs?limit=${encodeURIComponent(String(limit))}`);
+  if (Array.isArray(data?.items)) return data.items as MarketDailyJobHistory[];
   if (Array.isArray(data?.data)) return data.data as MarketDailyJobHistory[];
   if (Array.isArray(data)) return data as MarketDailyJobHistory[];
   return [];
@@ -118,7 +120,7 @@ export async function cancelMarketDailyJob(jobId: string): Promise<unknown> {
 }
 
 export async function cancelTickerScanJob(jobId: string): Promise<unknown> {
-  return http.delete(`/tickerscanner/scan/jobs/${encodeURIComponent(jobId)}`);
+  return http.delete(`/tickerscanner/universe/scan/jobs/${encodeURIComponent(jobId)}`);
 }
 
 export type UserDailyJob = {
@@ -183,6 +185,7 @@ export async function cancelUserDailyJob(jobId: string): Promise<unknown> {
 
 export async function fetchUserDailyScoreJobs(limit = 20): Promise<UserDailyScoreJob[]> {
   const data = await http.get<any>(`/tickerscanner/fundamentals/user-daily-score-jobs?limit=${encodeURIComponent(String(limit))}`);
+  if (Array.isArray(data?.items)) return data.items as UserDailyScoreJob[];
   if (Array.isArray(data?.data)) return data.data as UserDailyScoreJob[];
   if (Array.isArray(data)) return data as UserDailyScoreJob[];
   return [];
@@ -217,7 +220,54 @@ export type UserPipe = {
 
 export async function fetchUserPipes(): Promise<UserPipe[]> {
   const data = await http.get<any>("/tickerscanner/fundamentals/users/pipes");
+  if (Array.isArray(data?.items)) return data.items as UserPipe[];
   if (Array.isArray(data?.data)) return data.data as UserPipe[];
   if (Array.isArray(data)) return data as UserPipe[];
+  return [];
+}
+
+// Ranking Daily (Fase 4)
+export type RankingDailyRow = {
+  id?: number;
+  score_date?: string;
+  symbol?: string;
+  asset_type?: string;
+  bucket?: string;
+  rank_position?: number;
+  rank_score?: number | null;
+  source_score?: number | null;
+  passed_filters?: number;
+  reason_json?: {
+    source?: string;
+    total_score?: number | null;
+    quality_score?: number | null;
+    risk_score?: number | null;
+    momentum_score?: number | null;
+    price?: number | null;
+    atr_14_pct?: number | null;
+    dollar_vol_20d?: number | null;
+    trend?: { price_gt_sma50?: boolean | null; sma50_gt_sma200?: boolean | null };
+    filters?: Record<string, unknown>;
+  } | null;
+};
+
+export async function buildDailyRanking(
+  scoreDate: string,
+  mode: "normal" | "force" = "normal",
+  limits?: Record<string, number>,
+  filters?: Record<string, unknown>
+): Promise<unknown> {
+  const body: Record<string, unknown> = { score_date: scoreDate, mode };
+  if (limits) body.limits = limits;
+  if (filters) body.filters = filters;
+  return http.post("/tickerscanner/fundamentals/ranking/daily", body);
+}
+
+export async function fetchDailyRanking(scoreDate: string): Promise<RankingDailyRow[]> {
+  const data = await http.get<any>(
+    `/tickerscanner/fundamentals/ranking/daily?score_date=${encodeURIComponent(scoreDate)}`
+  );
+  if (Array.isArray(data?.items)) return data.items as RankingDailyRow[];
+  if (Array.isArray(data)) return data as RankingDailyRow[];
   return [];
 }

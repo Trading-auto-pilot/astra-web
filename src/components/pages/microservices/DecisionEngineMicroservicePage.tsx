@@ -158,7 +158,7 @@ export default function DecisionEngineMicroservicePage({
   const [pipeSelectedId, setPipeSelectedId] = useState<number | null>(() => {
     const stored = readPipeNav();
     const val = Number(stored?.pipeId);
-    return Number.isFinite(val) && val > 0 ? val : null;
+    return Number.isFinite(val) ? val : null;
   });
   const [pipeSelectedDate, setPipeSelectedDate] = useState<string>(() => {
     const stored = readPipeNav();
@@ -286,7 +286,7 @@ export default function DecisionEngineMicroservicePage({
         const enabled = rows.filter((p: any) => p?.enabled === true || p?.enabled === 1 || p?.enabled === "1");
         setPipeList(enabled);
         if (enabled.length && pipeSelectedId === null) {
-          setPipeSelectedId(Number(enabled[0]?.id) || null);
+          setPipeSelectedId(enabled[0]?.id !== undefined ? Number(enabled[0].id) : null);
         }
         setPipeListStatus("idle");
       })
@@ -359,7 +359,7 @@ export default function DecisionEngineMicroservicePage({
   }, [pipeSelectedId, pipeSelectedDate]);
 
   const refreshPipeLatest = async () => {
-    if (!pipeSelectedId || activeTab !== "pipe") return;
+    if (pipeSelectedId === null || activeTab !== "pipe") return;
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     const dateValue = pipeDateRef.current?.value || pipeSelectedDate;
     const qs = dateValue ? `?date=${encodeURIComponent(dateValue)}` : "";
@@ -405,7 +405,7 @@ export default function DecisionEngineMicroservicePage({
 
   useEffect(() => {
     if (activeTab !== "live") return;
-    if (!pipeSelectedId) return;
+    if (pipeSelectedId === null) return;
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     setLiveStatus("loading");
     setLiveError(null);
@@ -585,13 +585,13 @@ export default function DecisionEngineMicroservicePage({
             </div>
           </div>
 
-          {!pipeSelectedId && (
+          {pipeSelectedId === null && (
             <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
               Seleziona una pipe per gestire il live.
             </div>
           )}
 
-          {pipeSelectedId && (
+          {pipeSelectedId !== null && (
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <label className="text-[11px] font-semibold text-slate-700">
                 Date
@@ -2222,7 +2222,7 @@ export default function DecisionEngineMicroservicePage({
               <select
                 className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
                 value={pipeSelectedId ?? ""}
-                onChange={(e) => setPipeSelectedId(Number(e.target.value) || null)}
+                onChange={(e) => setPipeSelectedId(e.target.value === "" ? null : Number(e.target.value))}
               >
                 <option value="">Seleziona pipe</option>
                 {pipeList.map((pipe: any) => (
@@ -2270,12 +2270,12 @@ export default function DecisionEngineMicroservicePage({
             </div>
             <button
               className="rounded-md bg-slate-900 px-4 py-2 text-[12px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-              disabled={!pipeSelectedId || pipeRunStatus === "loading"}
+              disabled={pipeSelectedId === null || pipeRunStatus === "loading"}
               onClick={async () => {
                 const cacheValue = "true";
                 const dateValue = pipeDateRef.current?.value || pipeSelectedDate;
                 const maxDistanceValue = Number.isFinite(pipeMaxDistanceAtr) ? pipeMaxDistanceAtr : 3;
-                if (!pipeSelectedId) return;
+                if (pipeSelectedId === null) return;
                 setPipeRunStatus("loading");
                 setPipePollError(null);
                 setPipeStats(null);
@@ -2314,19 +2314,19 @@ export default function DecisionEngineMicroservicePage({
             </button>
             <button
               className="rounded-md border border-slate-300 px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-              disabled={!pipeSelectedId || pipeLatestStatus === "loading"}
+              disabled={pipeSelectedId === null || pipeLatestStatus === "loading"}
               onClick={refreshPipeLatest}
             >
               Refresh
             </button>
             <button
               className="rounded-md border border-slate-300 px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-              disabled={!pipeSelectedId || pipeRunStatus === "loading"}
+              disabled={pipeSelectedId === null || pipeRunStatus === "loading"}
               onClick={async () => {
                 const cacheValue = "false";
                 const dateValue = pipeDateRef.current?.value || pipeSelectedDate;
                 const maxDistanceValue = Number.isFinite(pipeMaxDistanceAtr) ? pipeMaxDistanceAtr : 3;
-                if (!pipeSelectedId) return;
+                if (pipeSelectedId === null) return;
                 setPipeRunStatus("loading");
                 setPipePollError(null);
                 setPipeStats(null);
@@ -2462,6 +2462,7 @@ export default function DecisionEngineMicroservicePage({
                 <tr>
                   <th className="px-3 py-2 font-semibold">#</th>
                   <th className="px-3 py-2 font-semibold">Symbol</th>
+                  <th className="px-3 py-2 font-semibold">Type</th>
                   <th className="px-3 py-2 font-semibold">Exchange</th>
                   <th className="px-3 py-2 font-semibold">Current</th>
                   <th className="px-3 py-2 font-semibold">Retracement</th>
@@ -2497,6 +2498,15 @@ export default function DecisionEngineMicroservicePage({
                           </a>
                         ) : (
                           "-"
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.asset_type === "ETF" ? (
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700">ETF</span>
+                        ) : row.asset_type === "EQUITY" ? (
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-100 text-sky-700">EQ</span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-slate-700">{row.exchange || "-"}</td>
