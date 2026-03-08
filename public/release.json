@@ -1,6 +1,6 @@
 {
     "lastUpdate" : "07/03/2026",
-    "version": "3.4.0",
+    "version": "3.4.1",
     "note" : [  "1.0.0 First version test in PAPER environment",
                 "1.1.0 Fix  CliNav, added icons, added detailed tickers page",
                 "1.2.0 Improving detailed ticker page",
@@ -23,6 +23,7 @@
                 "3.1.2 Fix calendar picker and filters",
                 "3.2.0 Implementazione nuovi microservizi e funzionalitá",
                 "3.3.0 Revisione completa codice da Cloud.ai fix scheduler, utilizzo bus per messaggi e alerting",
-                "3.4.0 Aggiunti microservizi brokerExecutor-ibkr, capital-manager, liquidity-manager, sostituito DBManager con datahub"
+                "3.4.0 Aggiunti microservizi brokerExecutor-ibkr, capital-manager, liquidity-manager, sostituito DBManager con datahub",
+                "3.4.1 Aggiunta link a documentazione e Fix minori"
             ]
 }

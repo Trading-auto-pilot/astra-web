@@ -15,6 +15,7 @@ import {
   type AdminUser,} from "../../api/users";
 import SectionHeader from "../molecules/content/SectionHeader";
 import AppIcon from "../atoms/icon/AppIcon";
+import { env } from "../../config/env";
 
 type Status = "idle" | "loading" | "error";
 
@@ -278,6 +279,7 @@ const normalizeEditingDefaults = (perms: any[], isAdmin: boolean) => {
 };
 
 export function UsersPage() {
+  const usersHelpUrl = `${env.helpBase}/docs/utente/navigazione-menu-laterale-users`;
   const permissionsClientIdRef = useRef(0);
   const makePermissionClientId = () => `perm-${++permissionsClientIdRef.current}`;
 
@@ -1000,7 +1002,21 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Users" subTitle="Gestione utenti amministrativi" />
+      <SectionHeader
+        title="Users"
+        subTitle="Gestione utenti amministrativi"
+        actionComponent={
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            title="Apri guida Users"
+            aria-label="Apri guida Users"
+            onClick={() => window.open(usersHelpUrl, "_blank", "noopener,noreferrer")}
+          >
+            <AppIcon icon="mdi:help-circle-outline" className="h-4 w-4" />
+          </button>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <button

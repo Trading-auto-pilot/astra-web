@@ -12,6 +12,7 @@ import {
 } from "../../api/apiKeys";
 import SectionHeader from "../molecules/content/SectionHeader";
 import AppIcon from "../atoms/icon/AppIcon";
+import { env } from "../../config/env";
 
 const HTTP_METHOD_OPTIONS = ["GET", "POST", "PUT", "DELETE", "ANY"];
 
@@ -60,6 +61,7 @@ const maskApiKey = (value?: string | null) => {
 const isMarkedForDelete = (perm: any) => !!perm?._markedForDelete;
 
 export function ApiKeysPage() {
+  const apiKeysHelpUrl = `${env.helpBase}/docs/utente/navigazione-menu-laterale-api-key`;
   const permClientIdRef = useRef(0);
   const makePermClientId = () => `perm-${++permClientIdRef.current}`;
 
@@ -229,7 +231,6 @@ export function ApiKeysPage() {
       "owner_user_id",
       "description",
       "is_active",
-      "expires_at",
     ];
     return fields.some((field) => (editingDraft as any)[field] !== (editingOriginal as any)[field]);
   };
@@ -263,11 +264,6 @@ export function ApiKeysPage() {
     const tasks: Promise<unknown>[] = [];
 
     if (hasKeyChanges()) {
-      const rawExpiresAt = (editingDraft as any).expires_at ?? null;
-      const normalizedExpiresAt =
-        typeof rawExpiresAt === "string" && rawExpiresAt.includes("T")
-          ? rawExpiresAt.split("T")[0]
-          : rawExpiresAt;
       const payload: Record<string, unknown> = {
         name: (editingDraft as any).name ?? null,
         owner_user_id:
@@ -275,8 +271,6 @@ export function ApiKeysPage() {
         description:
           (editingDraft as any).description === "" ? null : (editingDraft as any).description ?? null,
         is_active: toBool((editingDraft as any).is_active),
-        expires_at:
-          normalizedExpiresAt === "" ? null : normalizedExpiresAt ?? null,
       };
       tasks.push(updateApiKey(editingId, payload));
     }
@@ -448,7 +442,21 @@ export function ApiKeysPage() {
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="API Keys" subTitle="Gestione API Keys" />
+      <SectionHeader
+        title="API Keys"
+        subTitle="Gestione API Keys"
+        actionComponent={
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            title="Apri guida API Key"
+            aria-label="Apri guida API Key"
+            onClick={() => window.open(apiKeysHelpUrl, "_blank", "noopener,noreferrer")}
+          >
+            <AppIcon icon="mdi:help-circle-outline" className="h-4 w-4" />
+          </button>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -768,10 +776,11 @@ export function ApiKeysPage() {
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Scadenza (YYYY-MM-DD)
               <input
-                type="date"
-                value={(editingDraft as any).expires_at ?? ""}
-                onChange={(e) => setEditingDraft((prev) => ({ ...(prev || {}), expires_at: e.target.value }))}
-                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-400"
+                type="text"
+                value={formatDate((editingDraft as any).expires_at as any)}
+                readOnly
+                disabled
+                className="cursor-not-allowed rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"
               />
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 md:col-span-2">

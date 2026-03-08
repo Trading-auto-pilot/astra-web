@@ -186,8 +186,35 @@ export default function MicroserviceLogsCard({
     template: "Alert: {{message}}",
   });
 
+  const normalizeJsonDetail = (value: any) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "string") return value;
+
+    let current: any = value.trim();
+    if (!current) return value;
+
+    // Parse string payloads only when they are valid JSON.
+    for (let i = 0; i < 2 && typeof current === "string"; i += 1) {
+      const probe = current.trim();
+      if (!probe) break;
+      const startsLikeJson =
+        probe.startsWith("{") ||
+        probe.startsWith("[") ||
+        probe.startsWith("\"{") ||
+        probe.startsWith("\"[");
+      if (!startsLikeJson) break;
+      try {
+        current = JSON.parse(probe);
+      } catch {
+        break;
+      }
+    }
+
+    return current;
+  };
+
   const openJsonDetail = (value: any) => {
-    setJsonDetail(value ?? null);
+    setJsonDetail(normalizeJsonDetail(value));
   };
 
   const closeJsonDetail = () => {
@@ -1124,7 +1151,7 @@ export default function MicroserviceLogsCard({
             </div>
             <div className="max-h-[70vh] overflow-auto p-4">
               <pre className="whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
-{JSON.stringify(jsonDetail, null, 2)}
+{typeof jsonDetail === "string" ? jsonDetail : JSON.stringify(jsonDetail, null, 2)}
               </pre>
             </div>
           </div>
