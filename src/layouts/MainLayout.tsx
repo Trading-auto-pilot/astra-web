@@ -751,7 +751,10 @@ export function MainLayout({
               <BaseButton
                 variant="solid"
                 color="primary"
-                onClick={() => window.open("http://localhost:5001", "_blank", "noopener,noreferrer")}
+                onClick={() => {
+                  const vncBase = env.apiBaseUrl.replace("//api.", "//");
+                  window.open(`${vncBase}/ibkr-login/vnc.html?autoconnect=1&path=ibkr-login/websockify`, "_blank", "noopener,noreferrer");
+                }}
               >
                 Connect
               </BaseButton>

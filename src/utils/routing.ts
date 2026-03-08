@@ -10,6 +10,7 @@ export type RouteId =
   | "overview"
   | "dashboard"
   | "admin"
+  | "mobile"
   | "404";
 
 /**
@@ -65,6 +66,8 @@ export const getRouteId = (hash: string): RouteId => {
       return "dashboard";
     case "admin":
       return "admin";
+    case "mobile":
+      return "mobile";
     case "404":
       return "404";
     default:

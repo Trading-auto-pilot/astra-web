@@ -21,6 +21,7 @@ import BrokerExecutorIbkrMicroservicePage from "./microservices/BrokerExecutorIb
 import DatahubMicroservicePage from "./microservices/DatahubMicroservicePage";
 import McpGatewayMicroservicePage from "./microservices/McpGatewayMicroservicePage";
 import CapitalManagerMicroservicePage from "./microservices/CapitalManagerMicroservicePage";
+import IbkrLoginDesktopMicroservicePage from "./microservices/IbkrLoginDesktopMicroservicePage";
 
 type ReleaseInfo = {
   version?: string | null;
@@ -216,6 +217,16 @@ export default function AdminMicroserviceDetailPage() {
       case "capital-manager":
         return (
           <CapitalManagerMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+
+      case "ibkr-login-desktop":
+        return (
+          <IbkrLoginDesktopMicroservicePage
             onReleaseChange={setRelease}
             onHealthChange={setHealth}
             onOpenReleaseModal={() => setShowReleaseModal(true)}
