@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardPage from "./components/pages/DashboardPage";
+import MobilePage from "./components/pages/MobilePage";
 import LandingPage from "./components/pages/landing/Homepage";
 import MaintenancePage from "./components/pages/landing/Maintenance";
 import NotFoundPage from "./components/pages/landing/NotFound";
@@ -20,7 +21,7 @@ import {
   normalizeClientNavPage,
 } from "./contexts/AuthContext";
 
-const PROTECTED_ROUTES = new Set<RouteId>(["overview", "dashboard", "admin"]);
+const PROTECTED_ROUTES = new Set<RouteId>(["overview", "dashboard", "admin", "mobile"]);
 
 function AppContent() {
   const {
@@ -38,7 +39,7 @@ function AppContent() {
   const userName = user?.username ?? null;
 
   // Show the public top nav only on public pages.
-  const showNav = !["landing", "login", "overview", "dashboard", "admin"].includes(route);
+  const showNav = !["landing", "login", "overview", "dashboard", "admin", "mobile"].includes(route);
 
   const setHash = (id: RouteId) => {
     hashNavigate(id);
@@ -67,7 +68,7 @@ function AppContent() {
         const requestedHash = getCurrentHash();
         const permissionKey = normalizeClientNavPage(getPermissionKey(requestedHash));
 
-        if (pages.includes(permissionKey)) {
+        if (pages.includes(permissionKey) || (target === "mobile" && pages.includes("overview"))) {
           redirectTo(target, fromHashChange);
           return;
         }
@@ -115,6 +116,8 @@ function AppContent() {
       case "dashboard":
       case "admin":
         return <DashboardPage userName={userName ?? undefined} navEntries={navEntries} />;
+      case "mobile":
+        return <MobilePage />;
       default:
         return <NotFoundPage />;
     }
