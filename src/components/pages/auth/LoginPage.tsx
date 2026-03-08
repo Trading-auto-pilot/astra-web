@@ -9,6 +9,9 @@ import FormControl from "../../atoms/form/FormControl";
 import FormLabel from "../../atoms/form/FormLabel";
 import TextInput from "../../atoms/form/TextInput";
 
+const isMobileDevice = () =>
+  /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -52,7 +55,7 @@ export default function LoginPage() {
       setAuthToken(null);
       setNewPassword("");
       setConfirmPassword("");
-      window.location.hash = "/overview";
+      window.location.hash = isMobileDevice() ? "/mobile" : "/overview";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Impossibile aggiornare la password";
@@ -123,7 +126,7 @@ export default function LoginPage() {
         localStorage.removeItem("astraai:login:username");
       }
 
-      window.location.hash = "/overview";
+      window.location.hash = isMobileDevice() ? "/mobile" : "/overview";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Accesso non riuscito";

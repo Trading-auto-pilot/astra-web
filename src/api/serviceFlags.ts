@@ -1,5 +1,25 @@
 import { http, httpClient } from "./httpClient";
 
+export type ContainerInfo = {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+};
+
+export async function fetchContainers(signal?: AbortSignal): Promise<ContainerInfo[]> {
+  const data = await httpClient<any>("/servicecontrolplane/containers", { method: "GET", signal });
+  return data?.containers ?? [];
+}
+
+export async function doContainerAction(
+  name: string,
+  action: "start" | "stop" | "restart"
+): Promise<void> {
+  await http.post(`/servicecontrolplane/containers/${encodeURIComponent(name)}/${action}`);
+}
+
 export type ServiceFlag = {
   id: number;
   env: string;
