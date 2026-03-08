@@ -90,6 +90,7 @@ jobs:
             --platform linux/amd64 \
             --build-arg VITE_API_BASE_URL="${{ vars.VITE_API_BASE_URL }}" \
             --build-arg VITE_FMP_API_KEY="${{ secrets.FMP_API_KEY }}" \
+            --build-arg VITE_HELP_BASE="${{ secrets.VITE_HELP_BASE }}" \
             --build-arg VITE_ENV="${{ github.ref_name }}"   \
             --push \
             --tag "$DOCKERHUB_USERNAME/$NAME:latest" \

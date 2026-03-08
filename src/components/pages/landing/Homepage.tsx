@@ -6,6 +6,12 @@ import { env } from "../../../config/env";
 
 export default function Homepage() {
   const release = useRelease();
+  const releaseSlug = (release as any)?.version
+    ? `release-${String((release as any).version).trim().replace(/\./g, "-")}`
+    : null;
+  const releaseNotesUrl = releaseSlug
+    ? `${env.helpBase}/docs/release-notes/${releaseSlug}`
+    : `${env.helpBase}/docs/release-notes/overview`;
   const notes: string[] = Array.isArray((release as any)?.note)
     ? (release as any).note.map((item: unknown) => String(item))
     : [];
@@ -37,9 +43,21 @@ export default function Homepage() {
         <div className="mx-auto max-w-3xl min-h-[16rem] rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-lg backdrop-blur flex flex-col">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Release info</h2>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              Aggiornata
-            </span>
+            <div className="flex items-center gap-2">
+              <a
+                href={releaseNotesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                title="Leggi release notes"
+                aria-label="Leggi release notes"
+              >
+                i
+              </a>
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Aggiornata
+              </span>
+            </div>
           </div>
           <div className="divide-y divide-slate-200 text-sm text-slate-800 flex-1 overflow-auto">
             <div className="grid grid-cols-1 gap-2 py-3 sm:grid-cols-3 sm:items-center">
