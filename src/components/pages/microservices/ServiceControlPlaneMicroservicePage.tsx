@@ -26,7 +26,7 @@ type Container = {
 const API = `${env.apiBaseUrl}/servicecontrolplane`;
 const getAuthHeaders = (): Record<string, string> => {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
-  return token ? { Authorization: `Bearer ` } : {};
+  return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
 function stateColor(state: string) {
