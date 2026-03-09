@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import SectionHeader from "../molecules/content/SectionHeader";
 import AppIcon from "../atoms/icon/AppIcon";
 import { useMicroserviceSlug } from "../../hooks/useHashRouter";
+import { fetchContainers, type ContainerInfo } from "../../api/serviceFlags";
 
 // Import dedicated microservice components
 import AlertingServiceMicroservicePage from "./microservices/AlertingServiceMicroservicePage";
@@ -47,6 +48,7 @@ export default function AdminMicroserviceDetailPage() {
   // Shared state
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
   const [health, setHealth] = useState<Record<string, any> | null>(null);
+  const [containerInfo, setContainerInfo] = useState<ContainerInfo | null>(null);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
 
   // Get microservice slug from URL hash - hook handles hashchange automatically
@@ -59,8 +61,56 @@ export default function AdminMicroserviceDetailPage() {
   useEffect(() => {
     setRelease(null);
     setHealth(null);
+    setContainerInfo(null);
     setShowReleaseModal(false);
   }, [slug]);
+
+  const normalizeId = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const healthValue = String(health?.status ?? health?.health ?? "").toLowerCase();
+  const containerStatus = String(containerInfo?.status ?? "").toLowerCase();
+  const containerState = String(containerInfo?.state ?? "").toLowerCase();
+
+  const isHealthyFromHealth =
+    healthValue === "ok" || healthValue === "healthy" || healthValue === "up" || healthValue === "running";
+  const isUnhealthyFromHealth =
+    healthValue === "error" || healthValue === "unhealthy" || healthValue === "down" || healthValue === "failed";
+
+  const isHealthyFromContainer =
+    containerStatus.includes("healthy") ||
+    (containerState === "running" && !containerStatus.includes("unhealthy"));
+  const isUnhealthyFromContainer =
+    containerStatus.includes("unhealthy") || containerState === "exited" || containerState === "dead";
+
+  const isHealthy = isHealthyFromHealth || (!isUnhealthyFromHealth && isHealthyFromContainer);
+  const isUnhealthy = isUnhealthyFromHealth || isUnhealthyFromContainer;
+  const healthLabel = isHealthy ? "Healthy" : isUnhealthy ? "Unhealthy" : "Unknown";
+  const healthLabelLower = healthLabel.toLowerCase();
+  const statusUpMatch = containerInfo?.status?.match(/\bUp\b[^,]*/i);
+  const upText = statusUpMatch ? statusUpMatch[0].replace(/\s*\((healthy|unhealthy)\)\s*$/i, "").trim() : null;
+
+  useEffect(() => {
+    if (!normalizedSlug) return;
+    let active = true;
+
+    fetchContainers()
+      .then((list) => {
+        if (!active) return;
+        const target = normalizeId(normalizedSlug);
+        const match = list.find((c) => {
+          const name = normalizeId(c.name || "");
+          return name.includes(target) || target.includes(name);
+        });
+        setContainerInfo(match || null);
+      })
+      .catch(() => {
+        if (active) setContainerInfo(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [normalizedSlug]);
 
   // Render appropriate microservice component based on slug
   const renderMicroservice = () => {
@@ -252,25 +302,31 @@ export default function AdminMicroserviceDetailPage() {
         title={
           <div className="flex flex-col">
             <span className="text-lg font-bold text-slate-900">Microservice: {slug || "-"}</span>
-            {release?.version && (
-              <span className="text-xs font-normal text-slate-500">Version {release.version}</span>
+            {(release?.version || containerInfo) && (
+              <span className="text-xs font-normal text-slate-500">
+                {release?.version ? `Version ${release.version}` : "Version -"}
+                {containerInfo ? ` - ${containerInfo.id.slice(0, 12)}` : ""}
+                {upText ? ` (${upText})` : ""}
+              </span>
             )}
           </div>
         }
         subTitle=""
         actionComponent={
-          health && (
-            <div className="flex items-center gap-2">
-              <div
-                className={`h-2 w-2 rounded-full ${
-                  health?.status === "ok" || health?.health === "ok" ? "bg-emerald-500" : "bg-rose-500"
-                }`}
-              />
-              <span className="text-xs text-slate-600">
-                {health?.status === "ok" || health?.health === "ok" ? "Healthy" : "Unhealthy"}
-              </span>
-            </div>
-          )
+          <div className="flex items-center gap-3">
+            {(health || containerInfo) && (
+              <div className="flex items-center gap-2">
+                <div
+                  className={`h-2 w-2 rounded-full ${
+                    isHealthy ? "bg-emerald-500" : isUnhealthy ? "bg-rose-500" : "bg-amber-500"
+                  }`}
+                />
+                <span className="text-xs text-slate-600">
+                  {containerInfo?.state || "unknown"} ({healthLabelLower})
+                </span>
+              </div>
+            )}
+          </div>
         }
       />
 

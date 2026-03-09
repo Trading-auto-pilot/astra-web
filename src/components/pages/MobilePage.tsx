@@ -28,7 +28,7 @@ const getAuthToken = () =>
 
 const authHeaders = (): Record<string, string> => {
   const t = getAuthToken();
-  return t ? { Authorization: `Bearer ` } : {};
+  return t ? { Authorization: `Bearer ${t}` } : {};
 };
 
 const fetchWithTimeout = (url: string, options: RequestInit, ms = 10_000) => {

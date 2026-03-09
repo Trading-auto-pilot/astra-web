@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { env } from "../../../config/env";
+import { http } from "../../../api/httpClient";
 import AppIcon from "../../atoms/icon/AppIcon";
 import MicroserviceGeneralTab from "../../molecules/microservice/MicroserviceGeneralTab";
 
@@ -14,12 +15,6 @@ type Props = {
   onReleaseChange?: (rel: ReleaseInfo | null) => void;
   onHealthChange?: (health: Record<string, any> | null) => void;
   onOpenReleaseModal?: () => void;
-};
-
-const API = `${env.apiBaseUrl}/ibkr-login-desktop`;
-const getAuthHeaders = (): Record<string, string> => {
-  const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
-  return token ? { Authorization: `Bearer ` } : {};
 };
 
 export default function IbkrLoginDesktopMicroservicePage({
@@ -45,8 +40,7 @@ export default function IbkrLoginDesktopMicroservicePage({
 
   useEffect(() => {
     if (activeTab !== "desktop") return;
-    fetch(`${API}/credentials`, { headers: getAuthHeaders() })
-      .then((r) => r.json())
+    http.get<{ username: string; hasPassword: boolean }>("/ibkr-login-desktop/credentials")
       .then((d) => {
         setUsername(d.username || "");
         setHasPassword(!!d.hasPassword);
@@ -60,16 +54,7 @@ export default function IbkrLoginDesktopMicroservicePage({
     try {
       const body: Record<string, string> = { username };
       if (password) body.password = password;
-      const r = await fetch(`${API}/credentials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        setSaveResult({ error: `${r.status} ${(d as any)?.error || r.statusText}` });
-        return;
-      }
+      await http.post("/ibkr-login-desktop/credentials", body);
       if (password) setHasPassword(true);
       setPassword("");
       setSaveResult({ ok: true });
@@ -84,8 +69,7 @@ export default function IbkrLoginDesktopMicroservicePage({
     setFilling(true);
     setFillResult(null);
     try {
-      const r = await fetch(`${API}/credentials/fill`, { method: "POST", headers: getAuthHeaders() });
-      const d = await r.json();
+      const d = await http.post<{ ok: boolean; error?: string }>("/ibkr-login-desktop/credentials/fill");
       setFillResult(d.ok ? { ok: true } : { error: d.error || "Errore" });
     } catch (e: any) {
       setFillResult({ error: e.message });
