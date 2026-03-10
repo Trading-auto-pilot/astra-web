@@ -285,7 +285,7 @@ export default function LiquidityManagerMicroservicePage({
       )}
 
       {activeTab === "checkLiquidity" && (
-        <div className="mt-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-4 pb-[5px]">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-slate-900">Liquidity Score</div>
             <button

@@ -572,7 +572,7 @@ export default function DecisionEngineMicroservicePage({
       )}
 
       {activeTab === "live" && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 pb-[5px] shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-slate-900">Live Daily update</div>
@@ -877,7 +877,7 @@ export default function DecisionEngineMicroservicePage({
       )}
 
       {activeTab === "spot" && (
-        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-[11px] text-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-3 pb-[5px] text-[11px] text-slate-700">
           <div className="text-xs font-semibold text-slate-700">Swit Spot</div>
           <div className="mt-1 text-[11px] text-slate-500">
             Richiama <span className="font-semibold">/decision-engine/spot-finder</span>.

@@ -357,7 +357,7 @@ export default function CachemanagerMicroservicePage({
 
       {/* Tab Specific: Form per recuperare candles dai vari provider */}
       {activeTab === "specific" && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700 pb-[5px]">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs font-semibold text-slate-700">Candles</div>
@@ -652,7 +652,7 @@ export default function CachemanagerMicroservicePage({
 
       {/* Tab Cache (L3 - Redis): Gestione cache Redis */}
       {activeTab === "cache" && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700 pb-[5px]">
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-semibold text-slate-700">L3 Cache (Redis)</div>
             <div className="flex items-center gap-2">
@@ -848,7 +848,7 @@ export default function CachemanagerMicroservicePage({
 
       {/* Tab L2: Gestione cache file system */}
       {activeTab === "l2" && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700 pb-[5px]">
           <div className="mb-2 flex items-center justify-between">
             <div>
               <div className="text-xs font-semibold text-slate-700">L2 Cache (File system)</div>
@@ -1304,7 +1304,7 @@ export default function CachemanagerMicroservicePage({
 
       {/* Tab L2-hygiene: Risultati audit L2 */}
       {activeTab === "l2-hygiene" && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto mt-4 rounded-lg border border-slate-200 bg-white/70 px-3 py-3 text-[11px] text-slate-700 pb-[5px]">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs font-semibold text-slate-700">L2 Hygiene</div>

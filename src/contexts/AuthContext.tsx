@@ -90,6 +90,7 @@ const normalizeAllowedPages = (rawPages: string[]): string[] => {
     if (!expanded.includes("admin/logs")) expanded.push("admin/logs");
     if (!expanded.includes("admin/microservice")) expanded.push("admin/microservice");
     if (!expanded.includes("admin/alerts")) expanded.push("admin/alerts");
+    if (!expanded.includes("admin/capital-allocation")) expanded.push("admin/capital-allocation");
   }
 
   // Always allow Overview as safe fallback.
