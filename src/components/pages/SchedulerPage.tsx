@@ -229,6 +229,20 @@ export function SchedulerPage() {
   }, []);
 
   useEffect(() => {
+    const interval = setInterval(() => {
+      fetchSchedulerJobs()
+        .then((data) => {
+          setJobs(Array.isArray(data) ? data : []);
+        })
+        .catch(() => {
+          // silent polling failure
+        });
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     redisWsBridgeClient.start();
     const unsubscribe = redisWsBridgeClient.subscribe({
       filter: (msg) => {

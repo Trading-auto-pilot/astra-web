@@ -546,6 +546,15 @@ export default function AlertingServiceMicroservicePage({
   }, [activeTab, fetchRules, fetchDeliveries]);
 
   useEffect(() => {
+    if (activeTab !== "rules") return;
+    const interval = setInterval(() => {
+      fetchRules();
+      fetchDeliveries();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [activeTab, fetchRules, fetchDeliveries]);
+
+  useEffect(() => {
     if (lockToTab && activeTab !== lockToTab) {
       setActiveTab(lockToTab);
     }
@@ -1258,29 +1267,32 @@ export default function AlertingServiceMicroservicePage({
                   />
                 </label>
                 <div className="rounded-md border border-slate-200 bg-white px-2 py-2 text-[10px] text-slate-600">
-                  <div className="font-semibold text-slate-700">Template tags</div>
-                  <div className="mt-1 grid gap-x-3 gap-y-1 sm:grid-cols-2">
-                    <span>
-                      <span className="font-semibold text-slate-700">{"{{message}}"}</span> messaggio
-                    </span>
-                    <span>
-                      <span className="font-semibold text-slate-700">{"{{time}}"}</span> timestamp
-                    </span>
-                    <span>
-                      <span className="font-semibold text-slate-700">{"{{id}}"}</span> id log (se presente)
-                    </span>
-                    <span>
-                      <span className="font-semibold text-slate-700">{"{{level}}"}</span> livello
-                    </span>
-                    <span>
-                      <span className="font-semibold text-slate-700">{"{{service}}"}</span> microservizio
-                    </span>
-                    <span>
-                      <span className="font-semibold text-slate-700">{"{{module}}"}</span> modulo
-                    </span>
-                    <span>
-                      <span className="font-semibold text-slate-700">{"{{function}}"}</span> funzione
-                    </span>
+                  <div className="mb-1 font-semibold text-slate-700">Template tags <span className="font-normal text-slate-400">(click per inserire)</span></div>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      [
+                        { tag: "{{message}}",  label: "message" },
+                        { tag: "{{ticker}}",   label: "ticker" },
+                        { tag: "{{time}}",     label: "time" },
+                        { tag: "{{id}}",       label: "id" },
+                        { tag: "{{level}}",    label: "level" },
+                        { tag: "{{service}}",  label: "service" },
+                        { tag: "{{eventKey}}", label: "eventKey" },
+                        { tag: "{{eventId}}",  label: "eventId" },
+                        { tag: "{{module}}",   label: "module" },
+                        { tag: "{{function}}", label: "function" },
+                      ] as { tag: string; label: string }[]
+                    ).map(({ tag, label }) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        title={tag}
+                        onClick={() => setTemplateText((t) => t + tag)}
+                        className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-700 hover:bg-slate-200 active:bg-slate-300"
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
                 </div>
