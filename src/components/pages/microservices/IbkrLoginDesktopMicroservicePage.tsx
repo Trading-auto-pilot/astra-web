@@ -36,7 +36,7 @@ export default function IbkrLoginDesktopMicroservicePage({
   // In produzione: api.trading.expovin.it → trading.expovin.it
   // In locale: http://localhost:8080 (invariato)
   const vncBase = env.apiBaseUrl.replace("//api.", "//");
-  const vncUrl = `${vncBase}/ibkr-login/vnc.html?autoconnect=1&path=ibkr-login/websockify`;
+  const vncUrl = `${vncBase}/ibkr-login/vnc.html?autoconnect=1&path=ibkr-login/websockify&resize=scale`;
 
   useEffect(() => {
     if (activeTab !== "desktop") return;
