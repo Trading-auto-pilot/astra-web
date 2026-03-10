@@ -65,14 +65,16 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     }
 
     if (page === "admin/*" || page === "admin") {
-      ["users", "api_key", "logs", "alerts", "scheduler", "microservice"].forEach((segment) => {
+      ["users", "api_key", "logs", "alerts", "scheduler", "capital-allocation", "microservice"].forEach((segment) => {
         const href = `#/admin/${segment}`;
         const label =
           segment === "api_key"
             ? "API Key"
             : segment === "microservice"
               ? "Microservice"
-              : formatLabel(segment);
+              : segment === "capital-allocation"
+                ? "Capital Allocation"
+                : formatLabel(segment);
         if (!adminChildren.some((child) => child.href === href)) {
           adminChildren.push({ label, href });
         }
@@ -102,7 +104,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
   }
 
   if (adminChildren.length) {
-    const order = { users: 0, api_key: 1, logs: 2, alerts: 3, scheduler: 4, microservice: 5 } as Record<string, number>;
+    const order = { users: 0, api_key: 1, logs: 2, alerts: 3, scheduler: 4, "capital-allocation": 5, microservice: 6 } as Record<string, number>;
     adminChildren.sort((a, b) => {
       const aKey = String(a.href || "").replace(/^#\/admin\//, "");
       const bKey = String(b.href || "").replace(/^#\/admin\//, "");
@@ -438,6 +440,7 @@ export function MainLayout({
                         if (label === "Logs") return "mdi:text-box-outline";
                         if (label === "Alerts") return "mdi:alert-outline";
                         if (label === "Scheduler") return "mdi:clock-outline";
+                        if (label === "Capital Allocation") return "mdi:chart-pie";
                         if (label === "Tickers") return "mdi:chart-line";
                         if (label === "User Tickers") return "mdi:account-star";
                         return "mdi:circle";

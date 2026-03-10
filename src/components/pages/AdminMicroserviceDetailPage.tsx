@@ -143,6 +143,7 @@ export default function AdminMicroserviceDetailPage() {
         );
 
       case "rediswsbridge":
+      case "redis-ws-bridge":
         return (
           <RedisWsBridgeMicroservicePage
             onReleaseChange={setRelease}
