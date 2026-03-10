@@ -2211,7 +2211,7 @@ export default function DecisionEngineMicroservicePage({
       )}
 
       {activeTab === "pipe" && (
-        <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-[11px] text-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-3 pb-[5px] text-[11px] text-slate-700">
           <div className="text-xs font-semibold text-slate-700">Pipe Execution</div>
           <div className="mt-1 text-[11px] text-slate-500">
             Avvia <span className="font-semibold">/decision-engine/spot-finder/:pipeId</span> in async e mostra i risultati parziali.

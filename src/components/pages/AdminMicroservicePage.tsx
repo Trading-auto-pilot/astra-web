@@ -35,6 +35,18 @@ function containerStateBadge(state: string) {
   return { label: state.toUpperCase(), cls: "bg-slate-100 text-slate-500" };
 }
 
+function extractImageTag(image?: string) {
+  if (!image) return null;
+  const withoutDigest = image.split("@")[0] || image;
+  const lastSlash = withoutDigest.lastIndexOf("/");
+  const lastColon = withoutDigest.lastIndexOf(":");
+  if (lastColon > lastSlash) {
+    const tag = withoutDigest.slice(lastColon + 1).trim();
+    return tag || null;
+  }
+  return null;
+}
+
 export default function AdminMicroservicePage() {
   const [rows, setRows] = useState<ServiceFlag[]>([]);
   const [status, setStatus] = useState<Status>("idle");
@@ -116,10 +128,11 @@ export default function AdminMicroservicePage() {
   );
 
   const sortedRows = useMemo(() => {
-    return [...rows].sort((a, b) => {
-      if (a.env === b.env) return a.microservice.localeCompare(b.microservice);
-      return a.env.localeCompare(b.env);
-    });
+    return [...rows].sort((a, b) =>
+      String(a.microservice || "").localeCompare(String(b.microservice || ""), undefined, {
+        sensitivity: "base",
+      })
+    );
   }, [rows]);
 
   const containerByMicroservice = useMemo(() => {
@@ -135,7 +148,13 @@ export default function AdminMicroservicePage() {
 
   const unmatchedContainers = useMemo(() => {
     const matched = new Set(containerByMicroservice.values());
-    return containers.filter((c) => !matched.has(c));
+    return containers
+      .filter((c) => !matched.has(c))
+      .sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+          sensitivity: "base",
+        })
+      );
   }, [containers, containerByMicroservice]);
 
   return (
@@ -204,6 +223,12 @@ export default function AdminMicroservicePage() {
                     >
                       {row.microservice}
                     </a>
+                    {(() => {
+                      const c = containerByMicroservice.get(row.microservice);
+                      const tag = extractImageTag(c?.image);
+                      if (!tag) return null;
+                      return <span className="ml-2 text-[11px] font-normal text-slate-400">v{tag}</span>;
+                    })()}
                   </td>
                 <td className="px-3 py-2">
                     <label className="inline-flex cursor-pointer items-center gap-2">
@@ -313,7 +338,14 @@ export default function AdminMicroservicePage() {
                   const isRunning = c.state === "running";
                   return (
                     <tr key={c.id} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-semibold text-slate-900">{c.name}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">
+                        {c.name}
+                        {extractImageTag(c.image) ? (
+                          <span className="ml-2 text-[11px] font-normal text-slate-400">
+                            v{extractImageTag(c.image)}
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-2 text-slate-500 font-mono text-[11px]">{c.image}</td>
                       <td className="px-3 py-2">
                         <span

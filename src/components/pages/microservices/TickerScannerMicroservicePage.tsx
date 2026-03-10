@@ -63,7 +63,7 @@ export default function TickerScannerMicroservicePage({
 
       {/* Tab General: Usa il componente condiviso MicroserviceGeneralTab */}
       {activeTab === "general" && (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 overflow-y-auto pb-[5px] flex flex-col">
           <MicroserviceGeneralTab
             microservice="tickerscanner"
             onReleaseChange={onReleaseChange}
@@ -75,7 +75,7 @@ export default function TickerScannerMicroservicePage({
 
       {/* Tab Specific: Usa il componente esistente TickerScannerAdminPage */}
       {activeTab === "specific" && (
-        <div className="mt-4 flex-1 min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-3 text-[11px] text-slate-700 mb-[5px]">
+        <div className="mt-4 flex-1 min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-3 text-[11px] text-slate-700 pb-[5px]">
           {/*
             TickerScannerAdminPage contiene tutta la logica specifica:
             - Gestione job scanner
