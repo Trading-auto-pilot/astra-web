@@ -19,8 +19,8 @@ type Props = {
   onReleaseChange?: (rel: ReleaseInfo | null) => void;
   onHealthChange?: (health: Record<string, any> | null) => void;
   onOpenReleaseModal?: () => void;
-  initialTab?: "general" | "message" | "email" | "rules";
-  lockToTab?: "general" | "message" | "email" | "rules" | null;
+  initialTab?: "general" | "message" | "telegram" | "email" | "rules";
+  lockToTab?: "general" | "message" | "telegram" | "email" | "rules" | null;
 };
 
 type AlertingRule = {
@@ -52,7 +52,8 @@ type EventCatalogEntry = {
  *
  * Questo componente gestisce:
  * - Tab "General Settings": impostazioni comuni (DB Logger, Log Level, Communication Channels, Logs)
- * - Tab "Message": invio di messaggi WhatsApp di test
+ * - Tab "Whatsapp": invio di messaggi WhatsApp di test
+ * - Tab "Telegram": invio di messaggi Telegram di test
  * - Tab "Email": invio di email di test
  * - Tab "Rule Engine": gestione regole e reload
  */
@@ -64,13 +65,20 @@ export default function AlertingServiceMicroservicePage({
   lockToTab = null,
 }: Props) {
   // Gestione tab attivo
-  const [activeTab, setActiveTab] = useState<"general" | "message" | "email" | "rules">(initialTab);
+  const [activeTab, setActiveTab] = useState<"general" | "message" | "telegram" | "email" | "rules">(initialTab);
 
   // Stato per il tab Message (WhatsApp)
   const [messageText, setMessageText] = useState("");
   const [messageStatus, setMessageStatus] = useState<Status>("idle");
+  const [templateMessageStatus, setTemplateMessageStatus] = useState<Status>("idle");
   const [messageError, setMessageError] = useState<string | null>(null);
   const [messageResult, setMessageResult] = useState<Record<string, any> | null>(null);
+  const [templateContentSid, setTemplateContentSid] = useState("");
+  const [templateVariables, setTemplateVariables] = useState("");
+  const [telegramText, setTelegramText] = useState("");
+  const [telegramStatus, setTelegramStatus] = useState<Status>("idle");
+  const [telegramError, setTelegramError] = useState<string | null>(null);
+  const [telegramResult, setTelegramResult] = useState<Record<string, any> | null>(null);
 
   // Stato per il tab Email
   const [emailTo, setEmailTo] = useState("");
@@ -103,6 +111,7 @@ export default function AlertingServiceMicroservicePage({
   const [selectedEventKey, setSelectedEventKey] = useState<string>("");
   const [channelEmail, setChannelEmail] = useState(false);
   const [channelWhatsapp, setChannelWhatsapp] = useState(true);
+  const [channelTelegram, setChannelTelegram] = useState(false);
   const [emailToValue, setEmailToValue] = useState("");
   const [emailSubjectValue, setEmailSubjectValue] = useState("");
   const [templateText, setTemplateText] = useState("Alert: {{message}}");
@@ -347,6 +356,7 @@ export default function AlertingServiceMicroservicePage({
       const channels = [
         ...(channelWhatsapp ? ["whatsapp"] : []),
         ...(channelEmail ? ["email"] : []),
+        ...(channelTelegram ? ["telegram"] : []),
       ];
       const actionsJson = {
         channels,
@@ -400,6 +410,7 @@ export default function AlertingServiceMicroservicePage({
     selectedEventKey,
     channelEmail,
     channelWhatsapp,
+    channelTelegram,
     templateText,
     emailToValue,
     emailSubjectValue,
@@ -447,6 +458,7 @@ export default function AlertingServiceMicroservicePage({
     setSelectedEventKey("");
     setChannelEmail(false);
     setChannelWhatsapp(true);
+    setChannelTelegram(false);
     setEmailToValue("");
     setEmailSubjectValue("");
     setTemplateText("Alert: {{message}}");
@@ -473,6 +485,7 @@ export default function AlertingServiceMicroservicePage({
     setSelectedEventKey(match.event_key || "");
     setChannelEmail(channels.includes("email"));
     setChannelWhatsapp(channels.includes("whatsapp"));
+    setChannelTelegram(channels.includes("telegram"));
     setEmailToValue(actions.to || "");
     setEmailSubjectValue(actions.subject || "");
     setTemplateText(actions.template || "Alert: {{message}}");
@@ -525,7 +538,7 @@ export default function AlertingServiceMicroservicePage({
     matchSource === "events" ? !selectedEventService || !selectedEventKey : selectedLevels.length === 0;
   const isRuleActionConfigInvalid =
     (channelEmail && (!emailToValue.trim() || !emailSubjectValue.trim())) ||
-    (!channelEmail && !channelWhatsapp);
+    (!channelEmail && !channelWhatsapp && !channelTelegram);
   const isCreateRuleDirectDisabled =
     isSavingRule ||
     !newRuleName.trim() ||
@@ -612,7 +625,82 @@ export default function AlertingServiceMicroservicePage({
       setMessageStatus("error");
       setMessageError(err?.message || "Errore invio messaggio");
     }
-  }, [messageText]);
+  }, [messageText, token]);
+
+  /**
+   * Invia un messaggio WhatsApp template tramite l'endpoint /alertingservice/whatsapp/template
+   */
+  const handleSendTemplateMessage = useCallback(async () => {
+    setTemplateMessageStatus("loading");
+    setMessageError(null);
+    setMessageResult(null);
+
+    try {
+      let parsedVariables: any = undefined;
+      const rawVariables = templateVariables.trim();
+      if (rawVariables) {
+        try {
+          parsedVariables = JSON.parse(rawVariables);
+        } catch {
+          throw new Error("Template variables deve essere JSON valido");
+        }
+      }
+
+      const payload: Record<string, any> = {};
+      if (templateContentSid.trim()) {
+        payload.contentSid = templateContentSid.trim();
+      }
+      if (parsedVariables !== undefined) {
+        payload.variables = parsedVariables;
+      }
+
+      const res = await fetch(`${env.apiBaseUrl}/alertingservice/whatsapp/template`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore invio template message");
+      }
+      setMessageResult(data);
+      setTemplateMessageStatus("idle");
+    } catch (err: any) {
+      setTemplateMessageStatus("error");
+      setMessageError(err?.message || "Errore invio template message");
+    }
+  }, [templateVariables, templateContentSid, token]);
+
+  /**
+   * Invia un messaggio Telegram di test tramite l'endpoint /alertingservice/telegram/send
+   */
+  const handleSendTestTelegram = useCallback(async () => {
+    setTelegramStatus("loading");
+    setTelegramError(null);
+    setTelegramResult(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/alertingservice/telegram/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ text: telegramText.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || "Errore invio messaggio Telegram");
+      }
+      setTelegramResult(data);
+      setTelegramStatus("idle");
+    } catch (err: any) {
+      setTelegramStatus("error");
+      setTelegramError(err?.message || "Errore invio messaggio Telegram");
+    }
+  }, [telegramText, token]);
 
   /**
    * Invia una email di test tramite l'endpoint /alertingservice/email/send
@@ -662,7 +750,7 @@ export default function AlertingServiceMicroservicePage({
           General Settings
         </button>
 
-        {/* Tab Message (WhatsApp test) */}
+        {/* Tab Whatsapp (WhatsApp test) */}
         <button
           type="button"
           className={`pb-2 text-xs font-semibold transition ${
@@ -670,7 +758,18 @@ export default function AlertingServiceMicroservicePage({
           }`}
           onClick={() => setActiveTab("message")}
         >
-          Message
+          Whatsapp
+        </button>
+
+        {/* Tab Telegram (Telegram test) */}
+        <button
+          type="button"
+          className={`pb-2 text-xs font-semibold transition ${
+            activeTab === "telegram" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+          }`}
+          onClick={() => setActiveTab("telegram")}
+        >
+          Telegram
         </button>
 
         {/* Tab Email (Email test) */}
@@ -711,10 +810,10 @@ export default function AlertingServiceMicroservicePage({
         </div>
       )}
 
-      {/* Tab Message: Form per inviare messaggio WhatsApp di test */}
+      {/* Tab Whatsapp: Form per inviare messaggio WhatsApp di test */}
       {activeTab === "message" && (
         <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="text-sm font-semibold text-slate-900">Message test</div>
+          <div className="text-sm font-semibold text-slate-900">Whatsapp test</div>
           <div className="mt-1 text-[11px] text-slate-500">
             Invia un messaggio WhatsApp di test tramite alertingservice.
           </div>
@@ -730,6 +829,26 @@ export default function AlertingServiceMicroservicePage({
               />
             </label>
           </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="text-[11px] font-semibold text-slate-700">
+              Template ID (contentSid)
+              <input
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700"
+                value={templateContentSid}
+                onChange={(event) => setTemplateContentSid(event.target.value)}
+                placeholder="HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (opzionale)"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700">
+              Template Variables (JSON)
+              <input
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700"
+                value={templateVariables}
+                onChange={(event) => setTemplateVariables(event.target.value)}
+                placeholder='{"1":"AAPL","2":"65.40"}'
+              />
+            </label>
+          </div>
           {messageError && <div className="mt-2 text-[11px] text-rose-600">{messageError}</div>}
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -739,6 +858,14 @@ export default function AlertingServiceMicroservicePage({
               disabled={!messageText.trim() || messageStatus === "loading"}
             >
               {messageStatus === "loading" ? "Invio..." : "Send"}
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              onClick={handleSendTemplateMessage}
+              disabled={templateMessageStatus === "loading"}
+            >
+              {templateMessageStatus === "loading" ? "Invio template..." : "Send Template Message"}
             </button>
             {messageStatus === "idle" && messageText.trim() && (
               <span className="text-[11px] text-emerald-600">Pronto</span>
@@ -750,6 +877,59 @@ export default function AlertingServiceMicroservicePage({
               <div className="text-[11px] font-semibold text-emerald-800">Risposta</div>
               <div className="mt-1 space-y-1">
                 {Object.entries(messageResult).map(([key, value]) => (
+                  <div key={key} className="flex items-start gap-2">
+                    <span className="w-28 shrink-0 font-semibold text-emerald-800">{key}</span>
+                    <span className="break-all text-emerald-700">
+                      {typeof value === "string" || typeof value === "number"
+                        ? String(value)
+                        : JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab Telegram: Form per inviare messaggio Telegram di test */}
+      {activeTab === "telegram" && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-sm font-semibold text-slate-900">Telegram test</div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            Invia un messaggio Telegram di test tramite alertingservice.
+          </div>
+          <div className="mt-3">
+            <label className="text-[11px] font-semibold text-slate-700">
+              Messaggio
+              <textarea
+                className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700"
+                rows={4}
+                value={telegramText}
+                onChange={(event) => setTelegramText(event.target.value)}
+                placeholder="Scrivi il messaggio..."
+              />
+            </label>
+          </div>
+          {telegramError && <div className="mt-2 text-[11px] text-rose-600">{telegramError}</div>}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              onClick={handleSendTestTelegram}
+              disabled={!telegramText.trim() || telegramStatus === "loading"}
+            >
+              {telegramStatus === "loading" ? "Invio..." : "Send"}
+            </button>
+            {telegramStatus === "idle" && telegramText.trim() && (
+              <span className="text-[11px] text-emerald-600">Pronto</span>
+            )}
+          </div>
+          {telegramResult && (
+            <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-[11px] text-emerald-700">
+              <div className="text-[11px] font-semibold text-emerald-800">Risposta</div>
+              <div className="mt-1 space-y-1">
+                {Object.entries(telegramResult).map(([key, value]) => (
                   <div key={key} className="flex items-start gap-2">
                     <span className="w-28 shrink-0 font-semibold text-emerald-800">{key}</span>
                     <span className="break-all text-emerald-700">
@@ -1234,6 +1414,14 @@ export default function AlertingServiceMicroservicePage({
                         onChange={(event) => setChannelEmail(event.target.checked)}
                       />
                       Email
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={channelTelegram}
+                        onChange={(event) => setChannelTelegram(event.target.checked)}
+                      />
+                      Telegram
                     </label>
                   </div>
                 </div>

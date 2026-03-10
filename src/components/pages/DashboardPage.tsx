@@ -11,6 +11,7 @@ import AlertsPage from "./AlertsPage";
 import AdminMicroservicePage from "./AdminMicroservicePage";
 import AdminMicroserviceDetailPage from "./AdminMicroserviceDetailPage";
 import UserSettingsPage from "./UserSettingsPage";
+import CapitalAllocationPage from "./CapitalAllocationPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { env } from "../../config/env";
@@ -25,6 +26,19 @@ export type DashboardPageProps = {
   extraContent?: ReactNode;
 };
 
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("it-IT", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 type AppSection =
   | "overview"
   | "tickers"
@@ -35,6 +49,7 @@ type AppSection =
   | "logs"
   | "alerts"
   | "microservice"
+  | "capitalAllocation"
   | "userSettings";
 
 const getAppSection = (): AppSection => {
@@ -58,6 +73,7 @@ const getAppSection = (): AppSection => {
     if (parts[1] === "logs") return "logs";
     if (parts[1] === "alerts") return "alerts";
     if (parts[1] === "microservice") return "microservice";
+    if (parts[1] === "capital-allocation") return "capitalAllocation";
     return "overview";
   }
 
@@ -86,6 +102,8 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     confidence: number;
     market?: string;
     ts?: string;
+    timestamp?: string;
+    cacheMeta?: { cachedAt?: string };
   } | null>(null);
   const [liquidityStatus, setLiquidityStatus] = useState<"idle" | "loading" | "error">("idle");
   const [liquidityError, setLiquidityError] = useState<string | null>(null);
@@ -347,6 +365,14 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
     );
   }
 
+
+  if (section === "capitalAllocation") {
+    return (
+      <DashboardLayout userName={userName} navEntries={navEntries}>
+        <CapitalAllocationPage />
+      </DashboardLayout>
+    );
+  }
 
   if (section === "microservice") {
     return (
@@ -671,6 +697,9 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
                   <div className="mt-0.5 text-[10px] text-slate-400">
                     Score alto = più investimento · Score basso = più cash riservata
                   </div>
+                  <div className="mt-0.5 text-[10px] text-slate-400">
+                    Ultimo calcolo: {formatDateTime(ld?.timestamp ?? ld?.ts ?? ld?.cacheMeta?.cachedAt)}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -691,7 +720,7 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
               )}
 
               {ld && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                   {/* Score */}
                   <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
                     <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Score</div>
@@ -756,6 +785,38 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
                           ? "usa score"
                           : `usa fallback ${capitalConfig?.FALLBACK_RESERVED_CASH_PCT != null ? (capitalConfig.FALLBACK_RESERVED_CASH_PCT * 100).toFixed(0) + "%" : ""}`
                       }
+                    </div>
+                  </div>
+
+                  {/* Cash to save */}
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Cash da tenere</div>
+                    <div className="mt-1 text-[15px] font-bold tabular-nums text-rose-600">
+                      {(() => {
+                        const fromLimits = Number(capitalLimits?.CASH_TO_SAVE);
+                        if (Number.isFinite(fromLimits)) {
+                          return fromLimits.toLocaleString("en-US", {
+                            style: "currency",
+                            currency: "USD",
+                            minimumFractionDigits: 2,
+                          });
+                        }
+                        const maxInv = Number(capitalLimits?.MAX_INVESTMENT);
+                        const score = Number(ld?.score);
+                        if (Number.isFinite(maxInv) && Number.isFinite(score)) {
+                          const scorePct = Math.max(0, Math.min(100, score)) / 100;
+                          const computed = Math.max(0, maxInv - maxInv * scorePct);
+                          return computed.toLocaleString("en-US", {
+                            style: "currency",
+                            currency: "USD",
+                            minimumFractionDigits: 2,
+                          });
+                        }
+                        return "–";
+                      })()}
+                    </div>
+                    <div className="mt-1 text-[9px] text-slate-400">
+                      CASH_TO_SAVE (Redis) o fallback da MAX_INVESTMENT
                     </div>
                   </div>
                 </div>

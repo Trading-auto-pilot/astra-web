@@ -101,6 +101,7 @@ export const getPermissionKey = (hash: string): string => {
     if (section === "logs") return "admin/logs";
     if (section === "microservice") return "admin/microservice";
     if (section === "alerts") return "admin/alerts";
+    if (section === "capital-allocation") return "admin/capital-allocation";
     return "admin";
   }
 
