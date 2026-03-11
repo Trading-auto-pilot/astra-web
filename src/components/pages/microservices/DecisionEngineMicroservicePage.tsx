@@ -114,6 +114,9 @@ export default function DecisionEngineMicroservicePage({
   });
   const liveUnsubRef = useRef<null | (() => void)>(null);
   const [liveDetailRow, setLiveDetailRow] = useState<any>(null);
+  const [simStatus, setSimStatus] = useState<Status>("idle");
+  const [simError, setSimError] = useState<string | null>(null);
+  const [simActive, setSimActive] = useState<boolean>(false);
 
   // Spot states
   const [spotSymbol, setSpotSymbol] = useState("");
@@ -405,6 +408,23 @@ export default function DecisionEngineMicroservicePage({
 
   useEffect(() => {
     if (activeTab !== "live") return;
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+    fetch(`${env.apiBaseUrl}/market-simulator/session`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+      .then((res) => res.json().catch(() => ({})))
+      .then((data) => {
+        const active = Boolean(data?.ok && data?.session?.active);
+        setSimActive(active);
+      })
+      .catch(() => setSimActive(false));
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "live") return;
     if (pipeSelectedId === null) return;
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     setLiveStatus("loading");
@@ -613,7 +633,6 @@ export default function DecisionEngineMicroservicePage({
                     setLiveError(null);
                     const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
                     try {
-                      // 1. Avvia live su decision-engine
                       const res = await fetch(
                         `${env.apiBaseUrl}/decision-engine/spot-finder/live/${encodeURIComponent(
                           pipeSelectedId
@@ -631,7 +650,6 @@ export default function DecisionEngineMicroservicePage({
                       }
                       const tickers = Array.isArray(data?.subscribed) ? data.subscribed : [];
 
-                      // 2. Sottoscrivi i ticker su market-data-service
                       if (tickers.length > 0) {
                         const subscribeRes = await fetch(`${env.apiBaseUrl}/market-data-service/subscriptions`, {
                           method: "POST",
@@ -670,7 +688,6 @@ export default function DecisionEngineMicroservicePage({
                     setLiveError(null);
                     const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
                     try {
-                      // 1. Unsubscribe dai ticker su market-data-service
                       if (liveTickers.length > 0) {
                         await Promise.all(
                           liveTickers.map((ticker) =>
@@ -688,7 +705,6 @@ export default function DecisionEngineMicroservicePage({
                         );
                       }
 
-                      // 2. Ferma live su decision-engine
                       const res = await fetch(
                         `${env.apiBaseUrl}/decision-engine/spot-finder/live/${encodeURIComponent(
                           pipeSelectedId
@@ -717,12 +733,151 @@ export default function DecisionEngineMicroservicePage({
                   Stop live
                 </button>
               )}
+
+              {!simActive && (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-[11px] font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60"
+                  disabled={simStatus === "loading"}
+                  onClick={async () => {
+                    const token =
+                      typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                    setSimStatus("loading");
+                    setSimError(null);
+                    try {
+                      let tickers = liveTickers.filter((t) => String(t || "").trim().length > 0);
+
+                      if (!tickers.length) {
+                        const fromPipeRows = (Array.isArray(pipeResults) ? pipeResults : [])
+                          .map((r: any) => String(r?.ticker || r?.symbol || "").toUpperCase())
+                          .filter((t: string) => t.length > 0);
+                        tickers = Array.from(new Set(fromPipeRows));
+                      }
+
+                      if (!tickers.length && pipeSelectedId !== null) {
+                        const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
+                        const latestRes = await fetch(
+                          `${env.apiBaseUrl}/decision-engine/spot-finder/latest/${encodeURIComponent(pipeSelectedId)}${qs}`,
+                          {
+                            headers: {
+                              "Content-Type": "application/json",
+                              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                            },
+                          }
+                        );
+                        const latestData = await latestRes.json().catch(() => ({}));
+                        if (latestRes.ok && latestData?.ok !== false) {
+                          const rows = Array.isArray(latestData?.data?.results) ? latestData.data.results : [];
+                          const fromLatest = rows
+                            .map((r: any) => String(r?.ticker || r?.symbol || "").toUpperCase())
+                            .filter((t: string) => t.length > 0);
+                          tickers = Array.from(new Set(fromLatest));
+                        }
+                      }
+
+                      if (!tickers.length) {
+                        throw new Error("Nessun ticker disponibile: avvia prima la pipe/live o carica uno snapshot latest");
+                      }
+
+                      const subRes = await fetch(`${env.apiBaseUrl}/market-simulator/subscriptions`, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        },
+                        body: JSON.stringify({ tickers }),
+                      });
+                      const subData = await subRes.json().catch(() => ({}));
+                      if (!subRes.ok || subData?.ok === false) {
+                        throw new Error(subData?.error || subData?.message || "Errore sottoscrizione simulatore");
+                      }
+
+                      const startDate = `${pipeSelectedDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
+                      const endDate = `${pipeSelectedDate || new Date().toISOString().slice(0, 10)}T23:59:59.999Z`;
+                      const sessionRes = await fetch(`${env.apiBaseUrl}/market-simulator/session`, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        },
+                        body: JSON.stringify({
+                          startDate,
+                          endDate,
+                          tf: "1Min",
+                          mode: "inject",
+                          intervalMs: 1000,
+                          tickers,
+                        }),
+                      });
+                      const sessionData = await sessionRes.json().catch(() => ({}));
+                      if (!sessionRes.ok || sessionData?.ok === false) {
+                        throw new Error(sessionData?.error || sessionData?.message || "Errore avvio simulazione");
+                      }
+
+                      setSimActive(true);
+                      setSimStatus("idle");
+                    } catch (err: any) {
+                      setSimStatus("error");
+                      setSimError(err?.message || "Errore avvio simulazione");
+                    }
+                  }}
+                >
+                  Start simulation
+                </button>
+              )}
+
+              {simActive && (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] font-semibold text-orange-700 hover:bg-orange-100"
+                  onClick={async () => {
+                    const token =
+                      typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                    setSimStatus("loading");
+                    setSimError(null);
+                    try {
+                      const stopRes = await fetch(`${env.apiBaseUrl}/market-simulator/session`, {
+                        method: "DELETE",
+                        headers: {
+                          "Content-Type": "application/json",
+                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        },
+                      });
+                      const stopData = await stopRes.json().catch(() => ({}));
+                      if (!stopRes.ok || stopData?.ok === false) {
+                        throw new Error(stopData?.error || stopData?.message || "Errore stop simulazione");
+                      }
+
+                      await fetch(`${env.apiBaseUrl}/market-simulator/subscriptions`, {
+                        method: "DELETE",
+                        headers: {
+                          "Content-Type": "application/json",
+                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        },
+                      });
+
+                      setSimActive(false);
+                      setSimStatus("idle");
+                    } catch (err: any) {
+                      setSimStatus("error");
+                      setSimError(err?.message || "Errore stop simulazione");
+                    }
+                  }}
+                >
+                  Stop simulation
+                </button>
+              )}
             </div>
           )}
 
           {liveError && (
             <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
               {liveError}
+            </div>
+          )}
+          {simError && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+              {simError}
             </div>
           )}
 
