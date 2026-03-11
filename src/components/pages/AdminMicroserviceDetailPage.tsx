@@ -23,6 +23,7 @@ import DatahubMicroservicePage from "./microservices/DatahubMicroservicePage";
 import McpGatewayMicroservicePage from "./microservices/McpGatewayMicroservicePage";
 import CapitalManagerMicroservicePage from "./microservices/CapitalManagerMicroservicePage";
 import IbkrLoginDesktopMicroservicePage from "./microservices/IbkrLoginDesktopMicroservicePage";
+import MarketSimulatorMicroservicePage from "./microservices/MarketSimulatorMicroservicePage";
 
 type ReleaseInfo = {
   version?: string | null;
@@ -278,6 +279,16 @@ export default function AdminMicroserviceDetailPage() {
       case "ibkr-login-desktop":
         return (
           <IbkrLoginDesktopMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+
+      case "market-simulator":
+        return (
+          <MarketSimulatorMicroservicePage
             onReleaseChange={setRelease}
             onHealthChange={setHealth}
             onOpenReleaseModal={() => setShowReleaseModal(true)}
