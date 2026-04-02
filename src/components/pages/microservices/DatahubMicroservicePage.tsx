@@ -18,8 +18,8 @@ type Props = {
   onReleaseChange?: (rel: ReleaseInfo | null) => void;
   onHealthChange?: (health: Record<string, any> | null) => void;
   onOpenReleaseModal?: () => void;
-  initialTab?: "general" | "tables";
-  lockToTab?: "general" | "tables" | null;
+  initialTab?: "general" | "tables" | "export";
+  lockToTab?: "general" | "tables" | "export" | null;
 };
 
 type SchemaInfo = {
@@ -60,7 +60,7 @@ export default function DatahubMicroservicePage({
   lockToTab = null,
 }: Props) {
   // Gestione tab attivo
-  const [activeTab, setActiveTab] = useState<"general" | "tables">(initialTab);
+  const [activeTab, setActiveTab] = useState<"general" | "tables" | "export">(initialTab);
 
   // Stato per il tab Tables
   const [schema, setSchema] = useState<SchemaInfo | null>(null);
@@ -88,6 +88,25 @@ export default function DatahubMicroservicePage({
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [isDateColumn, setIsDateColumn] = useState(false);
+
+  // Stato per il tab Export
+  const [archiveMonths, setArchiveMonths] = useState(6);
+  const [archiveStatus, setArchiveStatus] = useState<Status>("idle");
+  const [archiveResult, setArchiveResult] = useState<{
+    archived: number;
+    deleted: number;
+    files: Array<{ filename: string; ym: string; count: number; sizeBytes: number }>;
+    message?: string;
+  } | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiveFiles, setArchiveFiles] = useState<
+    Array<{ filename: string; sizeBytes: number; createdAt: string; modifiedAt: string }>
+  >([]);
+  const [archiveListStatus, setArchiveListStatus] = useState<Status>("idle");
+  const [archiveListError, setArchiveListError] = useState<string | null>(null);
+  const [restoringFile, setRestoringFile] = useState<string | null>(null);
+  const [restoreResultByFile, setRestoreResultByFile] = useState<Record<string, number>>({});
+  const [restoreErrorByFile, setRestoreErrorByFile] = useState<Record<string, string>>({});
 
   const token =
     typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
@@ -521,6 +540,95 @@ export default function DatahubMicroservicePage({
 
   const totalPages = tableData?.total ? Math.ceil(tableData.total / pageSize) : 0;
 
+  /**
+   * Carica la lista dei file archiviati
+   */
+  const fetchArchiveList = useCallback(async () => {
+    setArchiveListStatus("loading");
+    setArchiveListError(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/datahub/api/custom/logsArchive/list`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || "Errore caricamento lista archivi");
+      }
+      setArchiveFiles(data.items ?? []);
+      setArchiveListStatus("idle");
+    } catch (err: any) {
+      setArchiveListStatus("error");
+      setArchiveListError(err?.message || "Errore caricamento lista archivi");
+    }
+  }, [token]);
+
+  // Carica la lista archivi quando si entra nel tab Export
+  useEffect(() => {
+    if (activeTab === "export") {
+      fetchArchiveList();
+    }
+  }, [activeTab, fetchArchiveList]);
+
+  /**
+   * Avvia l'archiviazione dei log più vecchi di N mesi
+   */
+  const handleArchive = useCallback(async () => {
+    setArchiveStatus("loading");
+    setArchiveError(null);
+    setArchiveResult(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/datahub/api/custom/logsArchive/archive`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ months_to_keep: archiveMonths }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || "Errore durante l'archiviazione");
+      }
+      setArchiveResult(data);
+      setArchiveStatus("idle");
+      // Aggiorna la lista dei file
+      fetchArchiveList();
+    } catch (err: any) {
+      setArchiveStatus("error");
+      setArchiveError(err?.message || "Errore durante l'archiviazione");
+    }
+  }, [token, archiveMonths, fetchArchiveList]);
+
+  /**
+   * Ripristina un file archiviato nel DB
+   */
+  const handleRestore = useCallback(async (filename: string) => {
+    setRestoringFile(filename);
+    setRestoreErrorByFile((prev) => { const next = { ...prev }; delete next[filename]; return next; });
+    setRestoreResultByFile((prev) => { const next = { ...prev }; delete next[filename]; return next; });
+    try {
+      const res = await fetch(
+        `${env.apiBaseUrl}/datahub/api/custom/logsArchive/restore/${encodeURIComponent(filename)}`,
+        {
+          method: "POST",
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || "Errore durante il ripristino");
+      }
+      setRestoreResultByFile((prev) => ({ ...prev, [filename]: data.restored ?? 0 }));
+    } catch (err: any) {
+      setRestoreErrorByFile((prev) => ({
+        ...prev,
+        [filename]: err?.message || "Errore durante il ripristino",
+      }));
+    } finally {
+      setRestoringFile(null);
+    }
+  }, [token]);
+
   // Filtra le tabelle di sistema (quelle che iniziano con __)
   const userTables = useMemo(() => {
     return schema?.tables?.filter((table) => !table.startsWith("__")) || [];
@@ -569,6 +677,19 @@ export default function DatahubMicroservicePage({
             onClick={() => setActiveTab("tables")}
           >
             Tables
+          </button>
+
+          {/* Tab Export */}
+          <button
+            type="button"
+            className={`pb-2 text-xs font-semibold transition ${
+              activeTab === "export"
+                ? "border-b-2 border-slate-900 text-slate-900"
+                : "text-slate-500"
+            }`}
+            onClick={() => setActiveTab("export")}
+          >
+            Export
           </button>
         </div>
       )}
@@ -1024,6 +1145,166 @@ export default function DatahubMicroservicePage({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab Export */}
+      {activeTab === "export" && (
+        <div className="mt-4 flex flex-1 min-h-0 flex-col gap-4">
+          {/* Sezione Archiviazione */}
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-100 px-4 py-3 bg-slate-50">
+              <div className="text-sm font-semibold text-slate-900">Archivia Log</div>
+              <div className="text-[10px] text-slate-500">
+                Esporta i log più vecchi su file .ndjson.gz e rimuovili dal database
+              </div>
+            </div>
+
+            <div className="p-4 flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-700 mb-1.5">
+                  Mesi da conservare
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={archiveMonths}
+                  onChange={(e) =>
+                    setArchiveMonths(Math.max(1, parseInt(e.target.value) || 1))
+                  }
+                  className="w-24 rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-700"
+                />
+              </div>
+              <button
+                type="button"
+                className="rounded-md bg-slate-900 px-4 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                onClick={handleArchive}
+                disabled={archiveStatus === "loading"}
+              >
+                {archiveStatus === "loading" ? "Archiviazione in corso..." : "Avvia Archiviazione"}
+              </button>
+            </div>
+
+            {archiveError && (
+              <div className="px-4 pb-4 text-[11px] text-rose-600">{archiveError}</div>
+            )}
+
+            {archiveResult && (
+              <div className="mx-4 mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <div className="text-[11px] font-semibold text-emerald-800">
+                  {archiveResult.message ?? "Archiviazione completata"}
+                </div>
+                {(archiveResult.archived > 0 || archiveResult.files.length > 0) && (
+                  <>
+                    <div className="mt-1.5 flex gap-6 text-[10px] text-emerald-700">
+                      <div>Record archiviati: <strong>{archiveResult.archived}</strong></div>
+                      <div>Record eliminati: <strong>{archiveResult.deleted}</strong></div>
+                      <div>File creati: <strong>{archiveResult.files.length}</strong></div>
+                    </div>
+                    {archiveResult.files.length > 0 && (
+                      <div className="mt-2 space-y-0.5">
+                        {archiveResult.files.map((f) => (
+                          <div key={f.ym} className="flex items-center gap-3 text-[10px] text-emerald-700">
+                            <span className="font-mono font-semibold">{f.filename}</span>
+                            <span>{f.count} record</span>
+                            <span>{(f.sizeBytes / 1024).toFixed(1)} KB</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Lista file archiviati */}
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
+            <div className="border-b border-slate-100 px-4 py-3 bg-slate-50 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">File Archiviati</div>
+                <div className="text-[10px] text-slate-500">
+                  {archiveFiles.length} file nella cartella archivio
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                onClick={fetchArchiveList}
+                disabled={archiveListStatus === "loading"}
+              >
+                {archiveListStatus === "loading" ? "..." : "Refresh"}
+              </button>
+            </div>
+
+            {archiveListError && (
+              <div className="px-4 py-2 text-[11px] text-rose-600">{archiveListError}</div>
+            )}
+
+            <div className="flex-1 overflow-y-auto">
+              {archiveListStatus === "loading" && archiveFiles.length === 0 && (
+                <div className="px-4 py-8 text-center text-[11px] text-slate-400">
+                  Caricamento...
+                </div>
+              )}
+
+              {archiveListStatus !== "loading" && archiveFiles.length === 0 && !archiveListError && (
+                <div className="px-4 py-8 text-center text-[11px] text-slate-400">
+                  Nessun file archiviato trovato
+                </div>
+              )}
+
+              {archiveFiles.length > 0 && (
+                <table className="w-full text-[11px]">
+                  <thead className="bg-slate-50 text-[10px] font-semibold text-slate-500 uppercase sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left">File</th>
+                      <th className="px-4 py-2 text-right whitespace-nowrap">Dimensione</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Creato</th>
+                      <th className="px-4 py-2 text-left">Azioni</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {archiveFiles.map((f) => (
+                      <tr key={f.filename} className="border-t border-slate-100 hover:bg-slate-50">
+                        <td className="px-4 py-2.5 font-mono text-slate-700 break-all">
+                          {f.filename}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-slate-500 whitespace-nowrap">
+                          {(f.sizeBytes / 1024).toFixed(1)} KB
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">
+                          {new Date(f.createdAt).toLocaleString("it-IT")}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              className="rounded-md border border-slate-200 px-3 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                              disabled={restoringFile === f.filename}
+                              onClick={() => handleRestore(f.filename)}
+                            >
+                              {restoringFile === f.filename ? "Ripristino..." : "Ripristina"}
+                            </button>
+                            {restoreResultByFile[f.filename] !== undefined && (
+                              <span className="text-[10px] font-semibold text-emerald-600">
+                                +{restoreResultByFile[f.filename]} record ripristinati
+                              </span>
+                            )}
+                            {restoreErrorByFile[f.filename] && (
+                              <span className="text-[10px] text-rose-500">
+                                {restoreErrorByFile[f.filename]}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}

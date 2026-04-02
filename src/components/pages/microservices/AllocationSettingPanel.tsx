@@ -111,6 +111,10 @@ export default function AllocationSettingPanel() {
   const [allocationModalOpen, setAllocationModalOpen] = useState(false);
   const [exposureSnapshot, setExposureSnapshot] = useState<ExposureSnapshot | null>(null);
   const [exposureRefreshing, setExposureRefreshing] = useState(false);
+  const [liquidityDetailOpen, setLiquidityDetailOpen] = useState(false);
+  const [liquidityDetailRow, setLiquidityDetailRow] = useState<Record<string, unknown> | null>(null);
+  const [liquidityDetailLoading, setLiquidityDetailLoading] = useState(false);
+  const [liquidityDetailError, setLiquidityDetailError] = useState<string | null>(null);
 
   // --- Liquidity section ---
   const [liquidityStatus, setLiquidityStatus] = useState<Status>("idle");
@@ -139,28 +143,6 @@ export default function AllocationSettingPanel() {
     [token]
   );
 
-  // Derived: residualCashToInvest
-  const residualCashToInvest = useMemo<number | null>(() => {
-    if (!ibkrAccount) return null;
-    const s = ibkrAccount.summary as Record<string, IbkrSummaryField> | undefined;
-    const getAmt = (field: IbkrSummaryField): number => {
-      if (field == null) return 0;
-      if (typeof field === "number") return field;
-      return typeof (field as any)?.amount === "number" ? (field as any).amount : 0;
-    };
-    const netLiquidation     = s ? getAmt(s.netliquidation ?? s.NetLiquidation) : 0;
-    const totalCashValue     = s ? getAmt(s.totalcashvalue ?? s.TotalCashValue) : 0;
-    const grossPositionValue = s ? getAmt(s.grosspositionvalue ?? s.GrossPositionValue) || undefined : undefined;
-    const activeOrdersCash   = ibkrOrders
-      .filter(o => o.status === "WORKING")
-      .reduce((sum, o) => sum + Number(o.limitPrice ?? 0) * Number(o.quantity ?? 0), 0);
-    const openPositions  = grossPositionValue != null ? grossPositionValue : Math.max(netLiquidation - totalCashValue, 0);
-    const effectiveMaxInv = maxInvestment ?? netLiquidation;
-    const scorePct        = liquidityData ? Math.max(0, Math.min(100, liquidityData.score)) / 100 : 0;
-    const cashToInvest    = Math.round(effectiveMaxInv * scorePct * 100) / 100;
-    return cashToInvest - openPositions - activeOrdersCash;
-  }, [ibkrAccount, ibkrOrders, liquidityData, maxInvestment]);
-
   // Effective max investment
   const effectiveMaxInvestment = useMemo<number | null>(() => {
     if (!ibkrAccount) return maxInvestment;
@@ -175,36 +157,29 @@ export default function AllocationSettingPanel() {
     return base > 0 ? base : null;
   }, [ibkrAccount, maxInvestment]);
 
-  // Persist derived limits to Redis whenever residualCashToInvest or effectiveMaxInvestment changes.
+  // Debounced save of MAX_INVESTMENT when user changes it via slider.
+  // Only persists the user-chosen ceiling — cashToSave is computed server-side.
   useEffect(() => {
-    if (!maxInvestmentLoaded || residualCashToInvest == null || !allocationConfig || !effectiveMaxInvestment) return;
-    fetch(`${env.apiBaseUrl}/capital-manager/allocation/limits`, {
-      method: "PUT",
-      headers,
-      body: JSON.stringify({ residualCashToInvest, maxInvestment: effectiveMaxInvestment }),
-    }).catch(() => {});
-  }, [maxInvestmentLoaded, residualCashToInvest, effectiveMaxInvestment, allocationConfig, headers]);
-
-  // Debounced save of MAX_INVESTMENT to Redis
-  useEffect(() => {
-    if (!maxInvestmentLoaded || maxInvestment == null || effectiveMaxInvestment == null) return;
+    if (!maxInvestmentLoaded || maxInvestment == null) return;
     const t = setTimeout(() => {
       fetch(`${env.apiBaseUrl}/capital-manager/allocation/limits`, {
         method: "PUT",
         headers,
-        body: JSON.stringify({ residualCashToInvest: residualCashToInvest ?? 0, maxInvestment: effectiveMaxInvestment }),
+        body: JSON.stringify({ maxInvestment }),
       }).catch(() => {});
     }, 1500);
     return () => clearTimeout(t);
-  }, [maxInvestmentLoaded, maxInvestment, effectiveMaxInvestment, headers, residualCashToInvest]);
+  }, [maxInvestmentLoaded, maxInvestment, headers]);
 
-  // Load persisted MAX_INVESTMENT from Redis on mount.
+  // Load MAX_INVESTMENT and server-computed cashToSave on mount.
   useEffect(() => {
     fetch(`${env.apiBaseUrl}/capital-manager/allocation/limits`, { headers })
       .then((r) => r.json())
       .then((data) => {
-        if (data?.maxInvestment != null) setMaxInvestment(Number(data.maxInvestment));
-        if (data?.cashToSave != null) setCashToSaveFromLimits(Number(data.cashToSave));
+        const d = data?.data ?? data;
+        if (d?.maxInvestment != null) setMaxInvestment(Number(d.maxInvestment));
+        else if (d?.MAX_INVESTMENT != null) setMaxInvestment(Number(d.MAX_INVESTMENT));
+        if (d?.cashToSave != null) setCashToSaveFromLimits(Number(d.cashToSave));
       })
       .catch(() => {})
       .finally(() => setMaxInvestmentLoaded(true));
@@ -381,6 +356,12 @@ export default function AllocationSettingPanel() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error?.message || data?.error || "Errore caricamento liquidità");
       const payload = data?.score != null ? data : data?.data ?? data;
+      // Prefer EMA-smoothed score over raw score (same logic as backend decisionEngine)
+      if (Number.isFinite(payload.score_ema)) payload.score = payload.score_ema;
+      // volatilityRegime (LOW/MEDIUM/HIGH) is always present; use it as fallback when volatility is absent
+      if (payload.volatility == null && payload.volatilityRegime != null) {
+        payload.volatility = payload.volatilityRegime;
+      }
       setLiquidityData(payload);
       setLiquidityStatus("idle");
     } catch (err: any) {
@@ -388,6 +369,25 @@ export default function AllocationSettingPanel() {
       setLiquidityError(err?.message || "Errore caricamento liquidità");
     }
   }, [headers]);
+
+  const openLiquidityDetail = useCallback(async () => {
+    setLiquidityDetailOpen(true);
+    if (liquidityDetailRow) return;
+    setLiquidityDetailLoading(true);
+    setLiquidityDetailError(null);
+    try {
+      const res = await fetch(`${env.apiBaseUrl}/datahub/api/table/liquidity_daily_scores?limit=1&sort_by=calculated_at&sort_dir=desc`, { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error?.message || data?.error || `HTTP ${res.status}`);
+      const rows = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      if (!rows.length) throw new Error("Nessun record trovato in liquidity_daily_scores");
+      setLiquidityDetailRow(rows[0]);
+    } catch (err: any) {
+      setLiquidityDetailError(err?.message || String(err));
+    } finally {
+      setLiquidityDetailLoading(false);
+    }
+  }, [headers, liquidityDetailRow]);
 
   const refreshExposure = useCallback(async () => {
     setExposureRefreshing(true);
@@ -465,14 +465,24 @@ export default function AllocationSettingPanel() {
                   Ultimo calcolo: {formatDate(ld?.timestamp ?? ld?.ts ?? ld?.cacheMeta?.cachedAt)}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={loadLiquidityData}
-                disabled={liquidityStatus === "loading"}
-                className="inline-flex shrink-0 items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-              >
-                {liquidityStatus === "loading" ? "Loading..." : "Load"}
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openLiquidityDetail}
+                  title="Dettagli ultimo run"
+                  className="inline-flex items-center justify-center rounded-full w-7 h-7 border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700 text-[13px] font-bold"
+                >
+                  i
+                </button>
+                <button
+                  type="button"
+                  onClick={loadLiquidityData}
+                  disabled={liquidityStatus === "loading"}
+                  className="inline-flex shrink-0 items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {liquidityStatus === "loading" ? "Loading..." : "Load"}
+                </button>
+              </div>
             </div>
 
             {liquidityError && (
@@ -908,6 +918,42 @@ export default function AllocationSettingPanel() {
         );
       })()}
 
+      {/* ── Liquidity Detail Modal ── */}
+      {liquidityDetailOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setLiquidityDetailOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-sm font-semibold text-slate-900">Liquidity Score — Ultimo run</div>
+              <button
+                type="button"
+                onClick={() => setLiquidityDetailOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            {liquidityDetailLoading && (
+              <div className="py-8 text-center text-[11px] text-slate-400">Caricamento...</div>
+            )}
+            {!liquidityDetailLoading && liquidityDetailError && (
+              <div className="py-4 rounded-md border border-rose-200 bg-rose-50 px-3 text-[11px] text-rose-700">{liquidityDetailError}</div>
+            )}
+            {!liquidityDetailLoading && !liquidityDetailError && !liquidityDetailRow && (
+              <div className="py-8 text-center text-[11px] text-slate-400">Nessun dato disponibile.</div>
+            )}
+            {!liquidityDetailLoading && liquidityDetailRow && (
+              <LiquidityDetailTable row={liquidityDetailRow} />
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Allocation Settings Modal ── */}
       {allocationModalOpen && (
         <div
@@ -1055,6 +1101,106 @@ export default function AllocationSettingPanel() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function LiquidityDetailTable({ row }: { row: Record<string, unknown> }) {
+  const fmt = (v: unknown): string => {
+    if (v == null) return "–";
+    if (typeof v === "number") return Number.isFinite(v) ? String(v) : "–";
+    if (typeof v === "boolean") return v ? "true" : "false";
+    return String(v);
+  };
+  const sections: { label: string; fields: [string, string][] }[] = [
+    {
+      label: "Generale",
+      fields: [
+        ["score_date", "Data"],
+        ["calculated_at", "Calcolato il"],
+        ["source", "Sorgente"],
+        ["confidence", "Confidence"],
+        ["components_available", "Componenti disponibili (bitmask)"],
+      ],
+    },
+    {
+      label: "Score",
+      fields: [
+        ["score_raw", "Score raw"],
+        ["score_ema", "Score EMA"],
+        ["score_rate_limited", "Score EMA rate-limited"],
+        ["alpha_effective", "Alpha effettivo"],
+        ["decay_applied", "Decay applicato"],
+        ["ema_staleness_days", "EMA staleness (giorni)"],
+      ],
+    },
+    {
+      label: "Regime",
+      fields: [
+        ["risk_regime", "Risk Regime"],
+        ["previous_risk_regime", "Risk Regime precedente"],
+        ["regime_changed", "Regime cambiato"],
+        ["volatility_regime", "Volatility Regime"],
+      ],
+    },
+    {
+      label: "VIX",
+      fields: [
+        ["vix_value", "Valore"],
+        ["vix_score", "Score normalizzato"],
+        ["vix_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "SPY",
+      fields: [
+        ["spy_return_1d", "Return 1d"],
+        ["spy_sma50", "SMA 50"],
+        ["spy_sma200", "SMA 200"],
+        ["spy_score", "Score normalizzato"],
+        ["spy_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "DXY",
+      fields: [
+        ["dxy_value", "Valore"],
+        ["dxy_score", "Score normalizzato"],
+        ["dxy_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "Credit Spread",
+      fields: [
+        ["credit_spread_value", "Valore"],
+        ["credit_score", "Score normalizzato"],
+        ["credit_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "Note",
+      fields: [["notes", "Note"]],
+    },
+  ];
+  return (
+    <div className="space-y-4">
+      {sections.map((s) => (
+        <div key={s.label} className="rounded-lg border border-slate-200">
+          <div className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            {s.label}
+          </div>
+          <table className="w-full text-[11px]">
+            <tbody>
+              {s.fields.map(([key, label]) => (
+                <tr key={key} className="border-t border-slate-100 first:border-t-0">
+                  <td className="px-3 py-1.5 font-medium text-slate-500 w-48">{label}</td>
+                  <td className="px-3 py-1.5 text-slate-800 font-mono">{fmt(row[key])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   );
 }
