@@ -171,6 +171,7 @@ export default function LoginPage() {
             onChange={(e) => setUsername(e.target.value)}
             required
             disabled={forcePasswordReset}
+            autoComplete="username"
           />
         </FormControl>
 
@@ -184,6 +185,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="current-password"
             />
           </FormControl>
         )}
@@ -199,6 +201,7 @@ export default function LoginPage() {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
+                autoComplete="new-password"
               />
             </FormControl>
 
@@ -211,6 +214,7 @@ export default function LoginPage() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
+                autoComplete="new-password"
               />
             </FormControl>
           </>
