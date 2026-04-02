@@ -93,7 +93,11 @@ export default function DecisionEngineMicroservicePage({
     return readStorageJson<any | null>(pipeNavStorageKey, null);
   };
 
-  const [activeTab, setActiveTab] = useState<"general" | "spot" | "pipe" | "live">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "spot" | "pipe" | "live">(() => {
+    const stored = readPipeNav();
+    const validTabs = ["general", "spot", "pipe", "live"];
+    return validTabs.includes(stored?.activeTab) ? stored.activeTab : "general";
+  });
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
   const [health, setHealth] = useState<Record<string, any> | null>(null);
 
@@ -183,7 +187,10 @@ export default function DecisionEngineMicroservicePage({
     return Number.isFinite(legacy) ? legacy : 3;
   });
   const pipeDateRef = useRef<HTMLInputElement | null>(null);
-  const [pipeJobId, setPipeJobId] = useState<string | null>(null);
+  const [pipeJobId, setPipeJobId] = useState<string | null>(() => {
+    const stored = readPipeNav();
+    return typeof stored?.jobId === "string" && stored.jobId.trim() ? stored.jobId.trim() : null;
+  });
   const [pipeStats, setPipeStats] = useState<any>(null);
   const [pipeResults, setPipeResults] = useState<any[]>([]);
   const [pipeErrors, setPipeErrors] = useState<any[]>([]);
@@ -194,6 +201,11 @@ export default function DecisionEngineMicroservicePage({
   const [pipeLatestNote, setPipeLatestNote] = useState<string | null>(null);
   const [pipeShowErrors, setPipeShowErrors] = useState(false);
   const [pipeDetailRow, setPipeDetailRow] = useState<any>(null);
+  const pipeStatusNormalized = String(pipeStats?.status || "").trim().toLowerCase();
+  const canStopPipeJob =
+    Boolean(pipeJobId) &&
+    !["completed", "error", "failed", "canceled", "cancelled"].includes(pipeStatusNormalized);
+  const prevPipeSelectionRef = useRef<{ pipeId: number | null; date: string } | null>(null);
 
   useEffect(() => {
     const payload = {
@@ -206,13 +218,15 @@ export default function DecisionEngineMicroservicePage({
 
   useEffect(() => {
     const payload = {
+      activeTab,
       pipeId: pipeSelectedId,
       date: pipeSelectedDate,
       limit: pipeLimit,
       maxDistanceAtr: pipeMaxDistanceAtr,
+      jobId: pipeJobId,
     };
     writeStorageJson(pipeNavStorageKey, payload);
-  }, [pipeSelectedId, pipeSelectedDate, pipeLimit, pipeMaxDistanceAtr]);
+  }, [activeTab, pipeSelectedId, pipeSelectedDate, pipeLimit, pipeMaxDistanceAtr, pipeJobId]);
 
   const formatNumber = (value: any, digits = 4) => {
     const num = Number(value);
@@ -334,6 +348,7 @@ export default function DecisionEngineMicroservicePage({
           data?.stats?.status === "error" ||
           data?.stats?.status === "canceled"
         ) {
+          setPipeJobId(null);
           if (timerId) clearInterval(timerId);
         }
       } catch (err: any) {
@@ -352,7 +367,13 @@ export default function DecisionEngineMicroservicePage({
   }, [pipeJobId, pipeLimit]);
 
   useEffect(() => {
-    setPipeJobId(null);
+    const prev = prevPipeSelectionRef.current;
+    const hasPrev = Boolean(prev);
+    const changed = hasPrev && (prev!.pipeId !== pipeSelectedId || prev!.date !== pipeSelectedDate);
+    prevPipeSelectionRef.current = { pipeId: pipeSelectedId, date: pipeSelectedDate };
+    if (changed) {
+      setPipeJobId(null);
+    }
     setPipeStats(null);
     setPipeResults([]);
     setPipeErrors([]);
@@ -2520,7 +2541,7 @@ export default function DecisionEngineMicroservicePage({
             </button>
             <button
               className="rounded-md border border-rose-200 bg-rose-600 px-4 py-2 text-[12px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
-              disabled={!pipeJobId || pipeStats?.status !== "running"}
+              disabled={!canStopPipeJob}
               onClick={async () => {
                 if (!pipeJobId) return;
                 const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
@@ -2544,6 +2565,7 @@ export default function DecisionEngineMicroservicePage({
                     status: data?.status || "canceled",
                     finishedAt: data?.finishedAt || new Date().toISOString(),
                   }));
+                  setPipeJobId(null);
                 } catch (err: any) {
                   setPipePollError(err?.message || "Errore stop job");
                 }
@@ -2645,12 +2667,14 @@ export default function DecisionEngineMicroservicePage({
                       <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
                       <td className="px-3 py-2 font-semibold text-slate-900">
                         {row.ticker ? (
-                          <a
-                            className="text-slate-900 underline-offset-2 hover:underline"
-                            href={`#/dashboard/tickers/${encodeURIComponent(String(row.ticker))}`}
-                          >
-                            {row.ticker}
-                          </a>
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              className="text-slate-900 underline-offset-2 hover:underline"
+                              href={`#/dashboard/tickers/${encodeURIComponent(String(row.ticker))}`}
+                            >
+                              {row.ticker}
+                            </a>
+                          </div>
                         ) : (
                           "-"
                         )}

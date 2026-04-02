@@ -10,7 +10,7 @@ type Props = {
 /**
  * Card per la gestione del Data Provider del CacheManager
  *
- * Permette di selezionare tra ALPACA, FMP e IBKR come provider di dati storici
+ * Permette di selezionare tra AUTO, ALPACA, POLYGON, FMP e IBKR come provider di dati storici
  */
 export default function MicroserviceDataProviderCard({
   provider,
@@ -29,7 +29,7 @@ export default function MicroserviceDataProviderCard({
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Radio buttons per la selezione del provider */}
-                  {["ALPACA", "FMP", "IBKR"].map((opt) => (
+                  {["AUTO", "ALPACA", "POLYGON", "FMP", "IBKR"].map((opt) => (
                     <label key={opt} className="inline-flex items-center gap-2 text-xs text-slate-700">
                       <input
                         type="radio"
@@ -49,7 +49,7 @@ export default function MicroserviceDataProviderCard({
                   )}
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Seleziona il provider storico usato dal cacheManager.
+                  <span className="font-medium">AUTO</span> = routing Alpaca → Polygon → IBKR → FMP (default).
                 </div>
               </div>
             </td>

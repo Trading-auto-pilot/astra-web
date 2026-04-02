@@ -107,6 +107,9 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
   } | null>(null);
   const [liquidityStatus, setLiquidityStatus] = useState<"idle" | "loading" | "error">("idle");
   const [liquidityError, setLiquidityError] = useState<string | null>(null);
+  const [liquidityDetailOpen, setLiquidityDetailOpen] = useState(false);
+  const [liquidityDetailRow, setLiquidityDetailRow] = useState<Record<string, unknown> | null>(null);
+  const [liquidityDetailLoading, setLiquidityDetailLoading] = useState(false);
 
   useEffect(() => {
     const syncSection = () => setSection(getAppSection());
@@ -270,11 +273,42 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error?.message || data?.error || "Errore caricamento liquidità");
       const payload = data?.score != null ? data : (data?.data ?? data);
+      // Prefer EMA-smoothed score over raw score (same logic as backend decisionEngine)
+      if (Number.isFinite(payload.score_ema)) payload.score = payload.score_ema;
+      // volatilityRegime (LOW/MEDIUM/HIGH) is always present; use it as fallback when volatility is absent
+      if (payload.volatility == null && payload.volatilityRegime != null) {
+        payload.volatility = payload.volatilityRegime;
+      }
       setLiquidityData(payload);
       setLiquidityStatus("idle");
+      // Refresh capitalLimits so cashToSave is recomputed server-side with the new score
+      fetchCapitalData();
     } catch (err: any) {
       setLiquidityStatus("error");
       setLiquidityError(err?.message || "Errore caricamento liquidità");
+    }
+  };
+
+  const [liquidityDetailError, setLiquidityDetailError] = useState<string | null>(null);
+
+  const openLiquidityDetail = async () => {
+    setLiquidityDetailOpen(true);
+    if (liquidityDetailRow) return; // already loaded
+    setLiquidityDetailLoading(true);
+    setLiquidityDetailError(null);
+    try {
+      const token = getAuthToken();
+      const h = { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+      const res = await fetch(`${env.apiBaseUrl}/datahub/api/table/liquidity_daily_scores?limit=1&sort_by=calculated_at&sort_dir=desc`, { headers: h });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error?.message || data?.error || `HTTP ${res.status}`);
+      const rows = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      if (!rows.length) throw new Error("Nessun record trovato in liquidity_daily_scores");
+      setLiquidityDetailRow(rows[0]);
+    } catch (err: any) {
+      setLiquidityDetailError(err?.message || String(err));
+    } finally {
+      setLiquidityDetailLoading(false);
     }
   };
 
@@ -573,7 +607,7 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
             sum + Number(o.limitPrice ?? 0) * Number(o.quantity ?? 0), 0);
           const residualCash       = Math.max(totalCashValue - activeOrdersCash, 0);
 
-          const maxInv = capitalLimits?.MAX_INVESTMENT ?? null;
+          const maxInv = capitalLimits?.maxInvestment ?? null;
           const statCards = [
             {
               label: "Liquidità netta",
@@ -665,7 +699,7 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
                       grossPositionValue={grossPositionValue}
                       availableFunds={availableFunds}
                       activeOrdersCash={activeOrdersCash}
-                      maxInvestment={capitalLimits?.MAX_INVESTMENT ?? undefined}
+                      maxInvestment={capitalLimits?.maxInvestment ?? undefined}
                     />
                   )}
                 </>
@@ -701,14 +735,24 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
                     Ultimo calcolo: {formatDateTime(ld?.timestamp ?? ld?.ts ?? ld?.cacheMeta?.cachedAt)}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={loadLiquidityData}
-                  disabled={liquidityStatus === "loading"}
-                  className="inline-flex shrink-0 items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                >
-                  {liquidityStatus === "loading" ? "Loading..." : "Load"}
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openLiquidityDetail}
+                    title="Dettagli ultimo run"
+                    className="inline-flex items-center justify-center rounded-full w-7 h-7 border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700 text-[13px] font-bold"
+                  >
+                    i
+                  </button>
+                  <button
+                    type="button"
+                    onClick={loadLiquidityData}
+                    disabled={liquidityStatus === "loading"}
+                    className="inline-flex shrink-0 items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    {liquidityStatus === "loading" ? "Loading..." : "Load"}
+                  </button>
+                </div>
               </div>
 
               {liquidityError && (
@@ -793,7 +837,7 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
                     <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Cash da tenere</div>
                     <div className="mt-1 text-[15px] font-bold tabular-nums text-rose-600">
                       {(() => {
-                        const fromLimits = Number(capitalLimits?.CASH_TO_SAVE);
+                        const fromLimits = Number(capitalLimits?.cashToSave);
                         if (Number.isFinite(fromLimits)) {
                           return fromLimits.toLocaleString("en-US", {
                             style: "currency",
@@ -801,7 +845,7 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
                             minimumFractionDigits: 2,
                           });
                         }
-                        const maxInv = Number(capitalLimits?.MAX_INVESTMENT);
+                        const maxInv = Number(capitalLimits?.maxInvestment);
                         const score = Number(ld?.score);
                         if (Number.isFinite(maxInv) && Number.isFinite(score)) {
                           const scorePct = Math.max(0, Math.min(100, score)) / 100;
@@ -825,7 +869,143 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
           );
         })()}
       </div>
+
+      {/* ── Liquidity Detail Modal ── */}
+      {liquidityDetailOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setLiquidityDetailOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-sm font-semibold text-slate-900">Liquidity Score — Ultimo run</div>
+              <button
+                type="button"
+                onClick={() => setLiquidityDetailOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            {liquidityDetailLoading && (
+              <div className="py-8 text-center text-[11px] text-slate-400">Caricamento...</div>
+            )}
+            {!liquidityDetailLoading && liquidityDetailError && (
+              <div className="py-4 rounded-md border border-rose-200 bg-rose-50 px-3 text-[11px] text-rose-700">{liquidityDetailError}</div>
+            )}
+            {!liquidityDetailLoading && !liquidityDetailError && !liquidityDetailRow && (
+              <div className="py-8 text-center text-[11px] text-slate-400">Nessun dato disponibile.</div>
+            )}
+            {!liquidityDetailLoading && liquidityDetailRow && (
+              <LiquidityDetailTable row={liquidityDetailRow} />
+            )}
+          </div>
+        </div>
+      )}
     </DashboardLayout>
+  );
+}
+
+function LiquidityDetailTable({ row }: { row: Record<string, unknown> }) {
+  const fmt = (v: unknown): string => {
+    if (v == null) return "–";
+    if (typeof v === "number") return Number.isFinite(v) ? String(v) : "–";
+    if (typeof v === "boolean") return v ? "true" : "false";
+    return String(v);
+  };
+  const sections: { label: string; fields: [string, string][] }[] = [
+    {
+      label: "Generale",
+      fields: [
+        ["score_date", "Data"],
+        ["calculated_at", "Calcolato il"],
+        ["source", "Sorgente"],
+        ["confidence", "Confidence"],
+        ["components_available", "Componenti disponibili (bitmask)"],
+      ],
+    },
+    {
+      label: "Score",
+      fields: [
+        ["score_raw", "Score raw"],
+        ["score_ema", "Score EMA"],
+        ["score_rate_limited", "Score EMA rate-limited"],
+        ["alpha_effective", "Alpha effettivo"],
+        ["decay_applied", "Decay applicato"],
+        ["ema_staleness_days", "EMA staleness (giorni)"],
+      ],
+    },
+    {
+      label: "Regime",
+      fields: [
+        ["risk_regime", "Risk Regime"],
+        ["previous_risk_regime", "Risk Regime precedente"],
+        ["regime_changed", "Regime cambiato"],
+        ["volatility_regime", "Volatility Regime"],
+      ],
+    },
+    {
+      label: "VIX",
+      fields: [
+        ["vix_value", "Valore"],
+        ["vix_score", "Score normalizzato"],
+        ["vix_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "SPY",
+      fields: [
+        ["spy_return_1d", "Return 1d"],
+        ["spy_sma50", "SMA 50"],
+        ["spy_sma200", "SMA 200"],
+        ["spy_score", "Score normalizzato"],
+        ["spy_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "DXY",
+      fields: [
+        ["dxy_value", "Valore"],
+        ["dxy_score", "Score normalizzato"],
+        ["dxy_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "Credit Spread",
+      fields: [
+        ["credit_spread_value", "Valore"],
+        ["credit_score", "Score normalizzato"],
+        ["credit_weight_used", "Peso usato"],
+      ],
+    },
+    {
+      label: "Note",
+      fields: [["notes", "Note"]],
+    },
+  ];
+  return (
+    <div className="space-y-4">
+      {sections.map((s) => (
+        <div key={s.label} className="rounded-lg border border-slate-200">
+          <div className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            {s.label}
+          </div>
+          <table className="w-full text-[11px]">
+            <tbody>
+              {s.fields.map(([key, label]) => (
+                <tr key={key} className="border-t border-slate-100 first:border-t-0">
+                  <td className="px-3 py-1.5 font-medium text-slate-500 w-48">{label}</td>
+                  <td className="px-3 py-1.5 text-slate-800 font-mono">{fmt(row[key])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
   );
 }
 
