@@ -19,6 +19,9 @@ dist-ssr
 *.key
 *.p12
 
+# File generati con credenziali — non committare
+generated_sql/
+
 # Backup files
 *.backup
 
