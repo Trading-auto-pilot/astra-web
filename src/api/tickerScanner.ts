@@ -60,8 +60,8 @@ export async function refreshTickerMomentum(): Promise<unknown> {
   return http.post("/tickerscanner/momentum/refresh");
 }
 
-export async function updateMarketDaily(): Promise<unknown> {
-  return http.post("/tickerscanner/fundamentals/update-market-daily");
+export async function updateMarketDaily(date?: string | null): Promise<unknown> {
+  return http.post("/tickerscanner/fundamentals/update-market-daily", date ? { date } : {});
 }
 
 export type MarketDailyJob = {

@@ -24,6 +24,8 @@ type Props = {
 
 type SchemaInfo = {
   tables?: string[];
+  tablesDetailed?: Array<{ name: string; schema?: string; type?: string }>;
+  tablesBySchema?: Record<string, string[]>;
   manualRoutes?: Array<{ name: string; path: string }>;
   lastRefresh?: string | null;
   totalEndpoints?: number;
@@ -634,6 +636,26 @@ export default function DatahubMicroservicePage({
     return schema?.tables?.filter((table) => !table.startsWith("__")) || [];
   }, [schema?.tables]);
 
+  const groupedUserTables = useMemo(() => {
+    const grouped = schema?.tablesBySchema || {};
+    const entries = Object.entries(grouped)
+      .map(([schemaName, tableNames]) => [
+        schemaName,
+        (Array.isArray(tableNames) ? tableNames : []).filter((table) => !String(table).startsWith("__")),
+      ] as const)
+      .filter(([, tableNames]) => tableNames.length > 0);
+
+    if (entries.length > 0) {
+      return entries;
+    }
+
+    if (userTables.length > 0) {
+      return [["Tables", userTables]] as Array<[string, string[]]>;
+    }
+
+    return [] as Array<[string, string[]]>;
+  }, [schema?.tablesBySchema, userTables]);
+
   /**
    * Controlla se una colonna ha filtri attivi (inclusi quelli con suffissi)
    */
@@ -742,20 +764,27 @@ export default function DatahubMicroservicePage({
               )}
 
               {userTables.length > 0 && (
-                <div className="p-2 space-y-1">
-                  {userTables.map((tableName) => (
-                    <button
-                      key={tableName}
-                      type="button"
-                      className={`w-full rounded-md px-3 py-2 text-left text-[11px] font-medium transition ${
-                        selectedTable === tableName
-                          ? "bg-slate-900 text-white"
-                          : "text-slate-700 hover:bg-slate-50"
-                      }`}
-                      onClick={() => handleTableSelect(tableName)}
-                    >
-                      {tableName}
-                    </button>
+                <div className="p-2 space-y-3">
+                  {groupedUserTables.map(([schemaName, tableNames]) => (
+                    <div key={schemaName} className="space-y-1">
+                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        {schemaName}
+                      </div>
+                      {tableNames.map((tableName) => (
+                        <button
+                          key={`${schemaName}:${tableName}`}
+                          type="button"
+                          className={`w-full rounded-md px-3 py-2 text-left text-[11px] font-medium transition ${
+                            selectedTable === tableName
+                              ? "bg-slate-900 text-white"
+                              : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                          onClick={() => handleTableSelect(tableName)}
+                        >
+                          {tableName}
+                        </button>
+                      ))}
+                    </div>
                   ))}
                 </div>
               )}

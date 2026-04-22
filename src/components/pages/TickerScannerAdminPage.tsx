@@ -108,6 +108,10 @@ export default function TickerScannerAdminPage() {
   const [pipes, setPipes] = useState<UserPipe[]>([]);
   const [userDailyVersion, setUserDailyVersion] = useState<string>("1.0");
 
+  // Market Daily state
+  const [showMarketDailyModal, setShowMarketDailyModal] = useState(false);
+  const [marketDailyDate, setMarketDailyDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+
   // Ranking Daily state
   const [showRankingModal, setShowRankingModal] = useState(false);
   const [rankingDate, setRankingDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
@@ -242,17 +246,14 @@ export default function TickerScannerAdminPage() {
   const rows = useMemo(() => jobs, [jobs]);
 
   const handleAction = useCallback(
-    async (action: "scan" | "scanForce" | "updateMarketDaily") => {
+    async (action: "scan" | "scanForce") => {
       setActionLoading(action);
       setActionStatus(null);
       try {
         if (action === "scan") await startTickerScan();
         if (action === "scanForce") await startTickerScanForce();
-        if (action === "updateMarketDaily") await updateMarketDaily();
         setActionStatus("OK");
-        // reload jobs shortly after triggering actions
         setTimeout(loadJobs, 500);
-        if (action === "updateMarketDaily") setTimeout(loadMarketJobs, 500);
       } catch (err: any) {
         setActionStatus(err?.message || "Errore");
       } finally {
@@ -314,7 +315,7 @@ export default function TickerScannerAdminPage() {
               color="neutral"
               size="sm"
               startIcon={<AppIcon icon="mdi:database-refresh" />}
-              onClick={() => handleAction("updateMarketDaily")}
+              onClick={() => setShowMarketDailyModal(true)}
               disabled={actionLoading !== null}
             >
               Update Market Daily
@@ -1118,6 +1119,48 @@ export default function TickerScannerAdminPage() {
       )}
 
       {/* Modal calcolo ranking */}
+      {showMarketDailyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl">
+            <div className="text-sm font-semibold text-slate-900">Update Market Daily</div>
+            <div className="mt-2 text-xs text-slate-600">
+              Aggiorna i dati EOD di mercato per la data selezionata. Default: oggi.
+            </div>
+            <div className="mt-3 flex flex-col gap-2 text-sm">
+              <label className="text-xs font-semibold text-slate-700">Data</label>
+              <input
+                type="date"
+                className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                value={marketDailyDate}
+                onChange={(e) => setMarketDailyDate(e.target.value)}
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <BaseButton variant="outline" color="neutral" size="sm" onClick={() => setShowMarketDailyModal(false)}>
+                Annulla
+              </BaseButton>
+              <BaseButton
+                variant="solid"
+                color="primary"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await updateMarketDaily(marketDailyDate);
+                    setShowMarketDailyModal(false);
+                    setTimeout(loadMarketJobs, 500);
+                    setActionStatus("Market Daily avviato");
+                  } catch (err: any) {
+                    setActionStatus(err?.message || "Errore avvio Market Daily");
+                  }
+                }}
+              >
+                Avvia
+              </BaseButton>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRankingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl">

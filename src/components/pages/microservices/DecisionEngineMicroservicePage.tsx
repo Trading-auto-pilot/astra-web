@@ -3,6 +3,7 @@ import SectionHeader from "../../molecules/content/SectionHeader";
 import BaseButton from "../../atoms/base/buttons/BaseButton";
 import AppIcon from "../../atoms/icon/AppIcon";
 import MicroserviceGeneralTab from "../../molecules/microservice/MicroserviceGeneralTab";
+import MicroserviceLogsCard from "../../molecules/microservice/MicroserviceLogsCard";
 import { env } from "../../../config/env";
 import { IBKR_MARKET_DATA_FIELDS } from "../../../config/ibkrMarketDataFields";
 import { redisWsBridgeClient } from "../../../services/ws/redisWsBridgeClient";
@@ -35,6 +36,100 @@ type InfoRowProps = {
   description: string;
 };
 
+type PipeLogModalState = {
+  ticker: string;
+  lastTouchAt: string;
+  messageQuery: string;
+  viewMode: "log" | "schema";
+};
+
+// --- State machine types & helpers -----------------------------------------
+
+type StateFlag = "OK" | "KO";
+type StateName = "INACTIVE" | "NO_TREND" | "TREND_OK" | "FLAG_READY" | "BREAKOUT_ZONE" | "PULLBACK_ZONE" | "RETRACEMENT_ZONE" | "ORDER_SENT";
+
+type StateTransition = {
+  ts: string;
+  from: StateName;
+  to: StateName;
+  event: string;
+  price: string;
+  breakLevel: string;
+};
+
+const STATE_COLORS: Record<StateName, string> = {
+  INACTIVE:          "bg-slate-100 text-slate-500",
+  NO_TREND:          "bg-red-100 text-red-700",
+  TREND_OK:          "bg-amber-100 text-amber-700",
+  FLAG_READY:        "bg-blue-100 text-blue-700",
+  BREAKOUT_ZONE:     "bg-emerald-100 text-emerald-700",
+  PULLBACK_ZONE:     "bg-teal-100 text-teal-700",
+  RETRACEMENT_ZONE:  "bg-purple-100 text-purple-700",
+  ORDER_SENT:        "bg-green-500 text-white",
+};
+
+function stateLabelFromFlags(trend: StateFlag, flag: StateFlag, breakout: StateFlag, pullback: StateFlag, retracement: StateFlag): StateName {
+  if (trend === "KO")        return "NO_TREND";
+  if (flag === "KO")         return "TREND_OK";
+  if (breakout === "OK")     return "BREAKOUT_ZONE";
+  if (pullback === "OK")     return "PULLBACK_ZONE";
+  if (retracement === "OK")  return "RETRACEMENT_ZONE";
+  return "FLAG_READY";
+}
+
+// Matches [live][diag] flags lines which carry the full state
+// Note: logger.js strips the first [live] bracket before storing to DB,
+// so "[live][diag] flags ..." is stored as "[diag] flags ..."
+// and "[live] BREAKOUT AREA ..." is stored as "BREAKOUT AREA ..."
+const FLAGS_DIAG_RE = /\[diag\] flags ticker=(\S+) price=(\S+) breakLevel=(\S+) \S+ \S+ trendOk=(true|false) flagOk=(true|false) breakoutOk=(true|false) pullbackOk=(true|false) retracementOk=(true|false)/;
+const ORDER_LINE_RE = /(BREAKOUT AREA|PULLBACK AREA|RETRACEMENT AREA) ticker=(\S+)/;
+
+function parseStateMachineFromLogs(logRows: any[], ticker: string): StateTransition[] {
+  const transitions: StateTransition[] = [];
+  let prevLabel: StateName | null = null;
+  let prevFlags: { trend: StateFlag; flag: StateFlag; breakout: StateFlag; pullback: StateFlag; retracement: StateFlag } | null = null;
+
+  for (const row of logRows) {
+    const message = String(row?.message || "");
+    const ts = String(row?.timestamp || "").replace("T", " ").slice(0, 23);
+
+    const orderMatch = message.match(ORDER_LINE_RE);
+    if (orderMatch && orderMatch[2].toUpperCase() === ticker) {
+      transitions.push({ ts, from: prevLabel ?? "INACTIVE", to: "ORDER_SENT", event: `🟢 ${orderMatch[1]}`, price: "-", breakLevel: "-" });
+      prevLabel = "ORDER_SENT";
+      continue;
+    }
+
+    const m = message.match(FLAGS_DIAG_RE);
+    if (!m || m[1].toUpperCase() !== ticker) continue;
+
+    const price = m[2]; const breakLevel = m[3];
+    const nextFlags = {
+      trend:      (m[4] === "true" ? "OK" : "KO") as StateFlag,
+      flag:       (m[5] === "true" ? "OK" : "KO") as StateFlag,
+      breakout:   (m[6] === "true" ? "OK" : "KO") as StateFlag,
+      pullback:   (m[7] === "true" ? "OK" : "KO") as StateFlag,
+      retracement:(m[8] === "true" ? "OK" : "KO") as StateFlag,
+    };
+    const nextLabel = stateLabelFromFlags(nextFlags.trend, nextFlags.flag, nextFlags.breakout, nextFlags.pullback, nextFlags.retracement);
+
+    if (prevLabel === null) {
+      transitions.push({ ts, from: "INACTIVE", to: nextLabel, event: "init", price, breakLevel });
+    } else if (nextLabel !== prevLabel) {
+      const changed: string[] = [];
+      if (prevFlags) {
+        for (const k of ["trend","flag","breakout","pullback","retracement"] as const) {
+          if (prevFlags[k] !== nextFlags[k]) changed.push(`${k}: ${prevFlags[k]}→${nextFlags[k]}`);
+        }
+      }
+      transitions.push({ ts, from: prevLabel, to: nextLabel, event: changed.join(", ") || "-", price, breakLevel });
+    }
+    prevLabel = nextLabel;
+    prevFlags = nextFlags;
+  }
+  return transitions;
+}
+
 const formatDateTime = (value?: string | null) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -46,6 +141,41 @@ const formatDateTime = (value?: string | null) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const normalizeDecisionLogDate = (value?: string | null) => {
+  if (!value) return null;
+  // Parse as Date first so any format (ISO, locale, unix ms) produces zero-padded YYYY-MM-DD
+  const d = new Date(String(value).trim());
+  if (!Number.isNaN(d.getTime())) {
+    return d.toISOString().slice(0, 10);
+  }
+  return null;
+};
+
+const buildDecisionLogRef = async (tickerValue: string, dateValue?: string | null) => {
+  const ticker = String(tickerValue || "").trim().toUpperCase();
+  if (!ticker || !dateValue) return null;
+  // The market-data-service embeds logRef=symref:TICKER:TS_SECONDS:HASH in every TRACE line.
+  // TS_SECONDS = Math.floor(message.ts / 1000) where message.ts ≈ new Date(lastTouchAt).getTime().
+  // We reconstruct the same format so the frontend filter matches the TRACE lines (not the INFO >> lines).
+  const d = new Date(String(dateValue).trim());
+  if (Number.isNaN(d.getTime())) return null;
+  const tsSeconds = Math.floor(d.getTime() / 1000);
+  const prefix = `symref:${ticker}:${tsSeconds}`;
+  try {
+    if (!window.crypto?.subtle) return prefix;
+    const source = `${ticker}:${tsSeconds}`;
+    const encoded = new TextEncoder().encode(source);
+    const digest = await window.crypto.subtle.digest("SHA-1", encoded);
+    const hash = Array.from(new Uint8Array(digest))
+      .map((part) => part.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 12);
+    return `${prefix}:${hash}`;
+  } catch {
+    return prefix;
+  }
 };
 
 const splitFieldLabel = (value: string) => {
@@ -118,7 +248,6 @@ export default function DecisionEngineMicroservicePage({
   });
   const liveUnsubRef = useRef<null | (() => void)>(null);
   const [liveDetailRow, setLiveDetailRow] = useState<any>(null);
-  const [simStatus, setSimStatus] = useState<Status>("idle");
   const [simError, setSimError] = useState<string | null>(null);
   const [simActive, setSimActive] = useState<boolean>(false);
 
@@ -201,6 +330,10 @@ export default function DecisionEngineMicroservicePage({
   const [pipeLatestNote, setPipeLatestNote] = useState<string | null>(null);
   const [pipeShowErrors, setPipeShowErrors] = useState(false);
   const [pipeDetailRow, setPipeDetailRow] = useState<any>(null);
+  const [pipeLogModal, setPipeLogModal] = useState<PipeLogModalState | null>(null);
+  const [pipeLogModalLoading, setPipeLogModalLoading] = useState(false);
+  const [schemaRows, setSchemaRows] = useState<any[]>([]);
+  const [schemaLoading, setSchemaLoading] = useState(false);
   const pipeStatusNormalized = String(pipeStats?.status || "").trim().toLowerCase();
   const canStopPipeJob =
     Boolean(pipeJobId) &&
@@ -255,6 +388,24 @@ export default function DecisionEngineMicroservicePage({
   const pctDelta = (a: number | null, b: number | null) => {
     if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
     return ((a - b) / b) * 100;
+  };
+
+  const openPipeLogsModal = async (row: any) => {
+    const ticker = String(row?.ticker || row?.symbol || "").trim().toUpperCase();
+    const lastTouchAt = String(row?.lastTouchAt || "").trim();
+    if (!ticker || !lastTouchAt) return;
+    setPipeLogModalLoading(true);
+    try {
+      const messageQuery = await buildDecisionLogRef(ticker, lastTouchAt);
+      setPipeLogModal({
+        ticker,
+        lastTouchAt,
+        messageQuery: messageQuery || `symref:${ticker}:${normalizeDecisionLogDate(lastTouchAt) || ""}`,
+        viewMode: "log",
+      });
+    } finally {
+      setPipeLogModalLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -755,98 +906,6 @@ export default function DecisionEngineMicroservicePage({
                 </button>
               )}
 
-              {!simActive && (
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-[11px] font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60"
-                  disabled={simStatus === "loading"}
-                  onClick={async () => {
-                    const token =
-                      typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
-                    setSimStatus("loading");
-                    setSimError(null);
-                    try {
-                      let tickers = liveTickers.filter((t) => String(t || "").trim().length > 0);
-
-                      if (!tickers.length) {
-                        const fromPipeRows = (Array.isArray(pipeResults) ? pipeResults : [])
-                          .map((r: any) => String(r?.ticker || r?.symbol || "").toUpperCase())
-                          .filter((t: string) => t.length > 0);
-                        tickers = Array.from(new Set(fromPipeRows));
-                      }
-
-                      if (!tickers.length && pipeSelectedId !== null) {
-                        const qs = pipeSelectedDate ? `?date=${encodeURIComponent(pipeSelectedDate)}` : "";
-                        const latestRes = await fetch(
-                          `${env.apiBaseUrl}/decision-engine/spot-finder/latest/${encodeURIComponent(pipeSelectedId)}${qs}`,
-                          {
-                            headers: {
-                              "Content-Type": "application/json",
-                              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                            },
-                          }
-                        );
-                        const latestData = await latestRes.json().catch(() => ({}));
-                        if (latestRes.ok && latestData?.ok !== false) {
-                          const rows = Array.isArray(latestData?.data?.results) ? latestData.data.results : [];
-                          const fromLatest = rows
-                            .map((r: any) => String(r?.ticker || r?.symbol || "").toUpperCase())
-                            .filter((t: string) => t.length > 0);
-                          tickers = Array.from(new Set(fromLatest));
-                        }
-                      }
-
-                      if (!tickers.length) {
-                        throw new Error("Nessun ticker disponibile: avvia prima la pipe/live o carica uno snapshot latest");
-                      }
-
-                      const subRes = await fetch(`${env.apiBaseUrl}/market-simulator/subscriptions`, {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                        },
-                        body: JSON.stringify({ tickers }),
-                      });
-                      const subData = await subRes.json().catch(() => ({}));
-                      if (!subRes.ok || subData?.ok === false) {
-                        throw new Error(subData?.error || subData?.message || "Errore sottoscrizione simulatore");
-                      }
-
-                      const startDate = `${pipeSelectedDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
-                      const endDate = `${pipeSelectedDate || new Date().toISOString().slice(0, 10)}T23:59:59.999Z`;
-                      const sessionRes = await fetch(`${env.apiBaseUrl}/market-simulator/session`, {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                        },
-                        body: JSON.stringify({
-                          startDate,
-                          endDate,
-                          tf: "1Min",
-                          mode: "inject",
-                          intervalMs: 1000,
-                          tickers,
-                        }),
-                      });
-                      const sessionData = await sessionRes.json().catch(() => ({}));
-                      if (!sessionRes.ok || sessionData?.ok === false) {
-                        throw new Error(sessionData?.error || sessionData?.message || "Errore avvio simulazione");
-                      }
-
-                      setSimActive(true);
-                      setSimStatus("idle");
-                    } catch (err: any) {
-                      setSimStatus("error");
-                      setSimError(err?.message || "Errore avvio simulazione");
-                    }
-                  }}
-                >
-                  Start simulation
-                </button>
-              )}
-
               {simActive && (
                 <button
                   type="button"
@@ -854,7 +913,6 @@ export default function DecisionEngineMicroservicePage({
                   onClick={async () => {
                     const token =
                       typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
-                    setSimStatus("loading");
                     setSimError(null);
                     try {
                       const stopRes = await fetch(`${env.apiBaseUrl}/market-simulator/session`, {
@@ -878,9 +936,7 @@ export default function DecisionEngineMicroservicePage({
                       });
 
                       setSimActive(false);
-                      setSimStatus("idle");
                     } catch (err: any) {
-                      setSimStatus("error");
                       setSimError(err?.message || "Errore stop simulazione");
                     }
                   }}
@@ -2785,7 +2841,19 @@ export default function DecisionEngineMicroservicePage({
                         )}
                       </td>
                       <td className="px-3 py-2 text-slate-700">
-                        {row?.lastTouchAt ? formatDateTime(row.lastTouchAt) : "-"}
+                        {row?.lastTouchAt ? (
+                          <button
+                            type="button"
+                            className="text-left font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900 disabled:cursor-wait disabled:opacity-60"
+                            onClick={() => openPipeLogsModal(row)}
+                            disabled={pipeLogModalLoading}
+                            title="Apri log filtrati per questo symbol/date"
+                          >
+                            {formatDateTime(row.lastTouchAt)}
+                          </button>
+                        ) : (
+                          "-"
+                        )}
                       </td>
                       <td className="px-3 py-2 text-slate-700">
                         <button
@@ -2875,6 +2943,141 @@ export default function DecisionEngineMicroservicePage({
                 </>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {pipeLogModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="flex h-[85vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Log Decision Engine</div>
+                <div className="text-[11px] text-slate-500 font-mono">{pipeLogModal.messageQuery}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {pipeLogModal.viewMode === "log" ? (
+                  <button
+                    type="button"
+                    className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    onClick={async () => {
+                      setSchemaLoading(true);
+                      try {
+                        const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
+                        // Fetch all log levels for this ticker session (TRACE+INFO needed for state parsing)
+                        const params = new URLSearchParams({ limit: "1000", microservice: "decision-engine", level: "trace,debug,log,info,warning,error" });
+                        const res = await fetch(`${env.apiBaseUrl}/cachemanager/Log?${params.toString()}`, {
+                          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                        });
+                        const data = await res.json();
+                        const items: any[] = Array.isArray(data) ? data : Array.isArray(data?.logs) ? data.logs : Array.isArray(data?.items) ? data.items : [];
+                        // Do NOT filter by symref: [live][diag] flags lines don't contain symref
+                        // parseStateMachineFromLogs filters by ticker internally
+                        setSchemaRows(items);
+                      } finally {
+                        setSchemaLoading(false);
+                      }
+                      setPipeLogModal((m) => m ? { ...m, viewMode: "schema" } : m);
+                    }}
+                  >
+                    {schemaLoading ? "Caricamento…" : "Mostra schema"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                    onClick={() => setPipeLogModal((m) => m ? { ...m, viewMode: "log" } : m)}
+                  >
+                    ← Mostra log
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                  onClick={() => setPipeLogModal(null)}
+                >
+                  Chiudi
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              {pipeLogModal.viewMode === "log" ? (
+                <div className="flex flex-1 p-4">
+                  <MicroserviceLogsCard
+                    microservice="decision-engine"
+                    fillHeight
+                    className="flex-1"
+                    initialMessageQuery={pipeLogModal.messageQuery}
+                    storageScope={`decision-engine-last-touch:${pipeLogModal.ticker}`}
+                    initialLevel="trace"
+                    initialService="decision-engine"
+                    initialPageSize={10000}
+                  />
+                </div>
+              ) : (() => {
+                const transitions = parseStateMachineFromLogs(schemaRows, pipeLogModal.ticker);
+                const currentState: StateName = transitions.length > 0 ? transitions[transitions.length - 1].to : "INACTIVE";
+                return (
+                  <div className="flex flex-1 flex-col gap-4 overflow-auto p-4">
+                    {/* Current state badge */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-semibold text-slate-500">Stato corrente:</span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${STATE_COLORS[currentState]}`}>{currentState}</span>
+                    </div>
+
+                    {transitions.length === 0 ? (
+                      <div className="rounded-lg border border-slate-200 p-6 text-center text-sm text-slate-500">
+                        Nessuna transizione trovata nei log filtrati.<br />
+                        <span className="text-xs text-slate-400">Assicurati che il decision-engine sia stato riavviato con il formato symref aggiornato.</span>
+                      </div>
+                    ) : (
+                      <div className="overflow-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50 text-[11px] text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold">Timestamp</th>
+                              <th className="px-3 py-2 text-left font-semibold">Da</th>
+                              <th className="px-3 py-2 text-center font-semibold">→</th>
+                              <th className="px-3 py-2 text-left font-semibold">A</th>
+                              <th className="px-3 py-2 text-left font-semibold">Evento</th>
+                              <th className="px-3 py-2 text-right font-semibold">Price</th>
+                              <th className="px-3 py-2 text-right font-semibold">BreakLevel</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {transitions.map((t, i) => (
+                              <tr key={i} className={t.to === "ORDER_SENT" ? "bg-green-50" : "hover:bg-slate-50"}>
+                                <td className="px-3 py-2 font-mono text-slate-500">{t.ts}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`rounded px-2 py-0.5 font-medium ${STATE_COLORS[t.from]}`}>{t.from}</span>
+                                </td>
+                                <td className="px-3 py-2 text-center text-slate-400">{t.to === "ORDER_SENT" ? "══►" : "→"}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`rounded px-2 py-0.5 font-medium ${STATE_COLORS[t.to]}`}>{t.to}</span>
+                                </td>
+                                <td className="px-3 py-2 text-slate-600">{t.event}</td>
+                                <td className="px-3 py-2 text-right font-mono">{t.price}</td>
+                                <td className="px-3 py-2 text-right font-mono">{t.breakLevel}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {(Object.entries(STATE_COLORS) as [StateName, string][]).map(([s, cls]) => (
+                        <span key={s} className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}>{s}</span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
       )}
