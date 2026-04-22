@@ -24,6 +24,7 @@ import McpGatewayMicroservicePage from "./microservices/McpGatewayMicroservicePa
 import CapitalManagerMicroservicePage from "./microservices/CapitalManagerMicroservicePage";
 import IbkrLoginDesktopMicroservicePage from "./microservices/IbkrLoginDesktopMicroservicePage";
 import MarketSimulatorMicroservicePage from "./microservices/MarketSimulatorMicroservicePage";
+import SimEngineMicroservicePage from "./microservices/SimEngineMicroservicePage";
 
 type ReleaseInfo = {
   version?: string | null;
@@ -289,6 +290,16 @@ export default function AdminMicroserviceDetailPage() {
       case "market-simulator":
         return (
           <MarketSimulatorMicroservicePage
+            onReleaseChange={setRelease}
+            onHealthChange={setHealth}
+            onOpenReleaseModal={() => setShowReleaseModal(true)}
+          />
+        );
+
+      case "sim-engine":
+      case "simulator":
+        return (
+          <SimEngineMicroservicePage
             onReleaseChange={setRelease}
             onHealthChange={setHealth}
             onOpenReleaseModal={() => setShowReleaseModal(true)}

@@ -118,7 +118,7 @@ export default function AlertingServiceMicroservicePage({
   const [createRuleStep, setCreateRuleStep] = useState<"match" | "actions">("match");
 
   const levelOptions = ["trace", "debug", "info", "warning", "error"];
-  const alertManagerHelpUrl = `${env.helpBase}/docs/utente/navigazione-menu-laterale-alertmanager-creare-alert`;
+  const alertManagerHelpUrl = `${env.helpBase}/docs/utente/servizi-a-supporto/alertmanager-creare-alert`;
   const serviceOptions = [
     "any",
     "alertingservice",

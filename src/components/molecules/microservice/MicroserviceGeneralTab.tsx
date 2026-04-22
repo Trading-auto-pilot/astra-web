@@ -23,6 +23,22 @@ type ChannelUiState = {
   params?: Record<string, any>;
 };
 
+type DbSettingMeta = {
+  id?: number;
+  param_key?: string;
+  param_value?: unknown;
+  description_it?: string | null;
+  description_en?: string | null;
+  used_by_microservices?: string[] | string | null;
+  active?: number | boolean | null;
+};
+
+type DbSettingRow = {
+  key: string;
+  value: string;
+  description: string;
+};
+
 type Props = {
   microservice: string;
   onDbLoggerChange?: (enabled: boolean) => void;
@@ -55,6 +71,8 @@ export default function MicroserviceGeneralTab({
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [editableSettings, setEditableSettings] = useState<Record<string, string>>({});
+  const [dbSettingsRows, setDbSettingsRows] = useState<DbSettingRow[]>([]);
+  const [settingsSearch, setSettingsSearch] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveSettingsError, setSaveSettingsError] = useState<string | null>(null);
   const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
@@ -97,6 +115,124 @@ export default function MicroserviceGeneralTab({
       return text;
     }
   };
+
+  const normalizeServiceAliases = useCallback((name: string) => {
+    const raw = String(name || "").trim();
+    if (!raw) return [] as string[];
+    const lower = raw.toLowerCase();
+    const aliases = new Set<string>([
+      raw,
+      lower,
+      raw.replace(/_/g, "-"),
+      lower.replace(/_/g, "-"),
+      raw.replace(/-/g, "_"),
+      lower.replace(/-/g, "_"),
+    ]);
+
+    if (lower === "cachemanager") aliases.add("cacheManager");
+    if (lower === "tickerscanner") aliases.add("tickerScanner");
+    if (lower === "servicecontrolplane") aliases.add("serviceControlPlane");
+    if (lower === "rediswsbridge") aliases.add("redis-ws-bridge");
+    if (lower === "ibkrkeepalive" || lower === "ibkrkeepalice") aliases.add("ibkr-keepalive");
+    if (lower === "sim-engine" || lower === "simulator") {
+      aliases.add("market-simulator");
+      aliases.add("simulator");
+    }
+    if (lower === "decision-engine") aliases.add("decision-engine");
+    if (lower === "capital-manager") aliases.add("capital-manager");
+    if (lower === "liquidity-manager") aliases.add("liquidity-manager");
+    if (lower === "market-data-service") aliases.add("market-data-service");
+    if (lower === "brokerexecutor-ibkr" || lower === "broker-executor-ibkr") aliases.add("brokerExecutor-ibkr");
+
+    return Array.from(aliases).filter(Boolean);
+  }, []);
+
+  const loadSettingsMetadata = useCallback(async (): Promise<DbSettingMeta[]> => {
+    const res = await fetch(`${env.apiBaseUrl}/datahub/api/table/settings?limit=500&sort_by=param_key&sort_dir=asc`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    const data = await parseJsonSafely(res);
+    if (!res.ok) {
+      const message = (data as any)?.message || (data as any)?.error || "Errore lettura metadata settings";
+      throw new Error(message);
+    }
+    const rows = (data as any)?.rows || (data as any)?.data || data;
+    return Array.isArray(rows) ? (rows as DbSettingMeta[]) : [];
+  }, [token]);
+
+  const buildDbSettingsRows = useCallback(
+    (runtimeSettings: Record<string, unknown> | null, metadata: DbSettingMeta[]) => {
+      const runtimeObj = runtimeSettings || {};
+      const aliases = new Set(normalizeServiceAliases(microservice));
+      const parseConsumers = (value: DbSettingMeta["used_by_microservices"]) => {
+        if (Array.isArray(value)) return value.map((item) => String(item));
+        if (typeof value === "string") {
+          try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+          } catch {
+            return value
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean);
+          }
+        }
+        return [] as string[];
+      };
+
+      const filteredMeta = metadata.filter((row) => {
+        const consumers = parseConsumers(row.used_by_microservices);
+        if (!consumers.length) return false;
+        return consumers.some((item) => aliases.has(String(item).trim()) || aliases.has(String(item).trim().toLowerCase()));
+      });
+
+      if (filteredMeta.length) {
+        return filteredMeta.map((row) => {
+          const key = String(row.param_key || "");
+          const runtimeValue = runtimeObj[key];
+          const fallbackValue = row.param_value;
+          const chosen = runtimeValue !== undefined ? runtimeValue : fallbackValue;
+          return {
+            key,
+            value: chosen != null ? String(chosen) : "",
+            description: row.description_it || row.description_en || "",
+          };
+        });
+      }
+
+      return Object.entries(runtimeObj)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => ({
+          key,
+          value: value != null ? String(value) : "",
+          description: "",
+        }));
+    },
+    [microservice, normalizeServiceAliases]
+  );
+
+  const visibleDbSettingsRows = useMemo(() => {
+    const baseRows = dbSettingsRows.length
+      ? dbSettingsRows
+      : Object.entries(editableSettings).map(([key, value]) => ({
+          key,
+          value,
+          description: "",
+        }));
+
+    const query = settingsSearch.trim().toLowerCase();
+    if (!query) return baseRows;
+
+    return baseRows.filter((row) => {
+      const key = row.key.toLowerCase();
+      const description = String(row.description || "").toLowerCase();
+      return key.includes(query) || description.includes(query);
+    });
+  }, [dbSettingsRows, editableSettings, settingsSearch]);
 
   const apiGet = useCallback(
     async (path: string) => {
@@ -166,6 +302,30 @@ export default function MicroserviceGeneralTab({
     },
     [apiSend]
   );
+
+  const openDbSettingsModal = useCallback(async () => {
+    setShowSettingsModal(true);
+    setSettingsSearch("");
+    setSettingsStatus("loading");
+    setSettingsError(null);
+    setSettingsSuccess(null);
+    setSaveSettingsError(null);
+    try {
+      const [runtimeData, metadata] = await Promise.all([fetchCacheSettings(), loadSettingsMetadata()]);
+      setSettings(runtimeData);
+      const obj: Record<string, string> = {};
+      Object.entries(runtimeData || {}).forEach(([k, v]) => {
+        obj[k] = v != null ? String(v) : "";
+      });
+      setEditableSettings(obj);
+      setDbSettingsRows(buildDbSettingsRows(runtimeData as Record<string, unknown>, metadata));
+      setSettingsStatus("idle");
+    } catch (err: any) {
+      setDbSettingsRows([]);
+      setSettingsError(err?.message || "Errore nel leggere i settings");
+      setSettingsStatus("error");
+    }
+  }, [buildDbSettingsRows, fetchCacheSettings, loadSettingsMetadata]);
 
   const normalizeChannels = useCallback((input: Record<string, any>) => {
     const result: Record<string, ChannelUiState> = {};
@@ -576,26 +736,7 @@ export default function MicroserviceGeneralTab({
               release={release}
               onDbLoggerChange={handleDbLoggerChange}
               onLogLevelChange={handleLogLevelChange}
-              onOpenDbSettings={() => {
-                setShowSettingsModal(true);
-                setSettingsStatus("loading");
-                setSettingsError(null);
-                setSettingsSuccess(null);
-                fetchCacheSettings()
-                  .then((data) => {
-                    setSettings(data);
-                    const obj: Record<string, string> = {};
-                    Object.entries(data || {}).forEach(([k, v]) => {
-                      obj[k] = v != null ? String(v) : "";
-                    });
-                    setEditableSettings(obj);
-                    setSettingsStatus("idle");
-                  })
-                  .catch((err: any) => {
-                    setSettingsError(err?.message || "Errore nel leggere i settings");
-                    setSettingsStatus("error");
-                  });
-              }}
+              onOpenDbSettings={openDbSettingsModal}
               onOpenReleaseInfo={() => {
                 onOpenReleaseModal?.();
               }}
@@ -649,26 +790,7 @@ export default function MicroserviceGeneralTab({
             release={release}
             onDbLoggerChange={handleDbLoggerChange}
             onLogLevelChange={handleLogLevelChange}
-            onOpenDbSettings={() => {
-              setShowSettingsModal(true);
-              setSettingsStatus("loading");
-              setSettingsError(null);
-              setSettingsSuccess(null);
-              fetchCacheSettings()
-                .then((data) => {
-                  setSettings(data);
-                  const obj: Record<string, string> = {};
-                  Object.entries(data || {}).forEach(([k, v]) => {
-                    obj[k] = v != null ? String(v) : "";
-                  });
-                  setEditableSettings(obj);
-                  setSettingsStatus("idle");
-                })
-                .catch((err: any) => {
-                  setSettingsError(err?.message || "Errore nel leggere i settings");
-                  setSettingsStatus("error");
-                });
-            }}
+            onOpenDbSettings={openDbSettingsModal}
             onOpenReleaseInfo={() => {
               onOpenReleaseModal?.();
             }}
@@ -701,7 +823,7 @@ export default function MicroserviceGeneralTab({
 
       {showSettingsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl">
+          <div className="w-[75vw] rounded-xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div className="text-base font-semibold text-slate-900">DB Settings</div>
               <button
@@ -713,6 +835,16 @@ export default function MicroserviceGeneralTab({
               </button>
             </div>
             <div className="max-h-[60vh] overflow-y-auto px-4 py-3 text-[11px] text-slate-700">
+              <div className="mb-3">
+                <input
+                  type="text"
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
+                  placeholder="Cerca per nome o descrizione"
+                  value={settingsSearch}
+                  onChange={(e) => setSettingsSearch(e.target.value)}
+                  disabled={settingsStatus === "loading"}
+                />
+              </div>
               {settingsStatus === "loading" && <div className="text-[11px] text-slate-500">Caricamento...</div>}
               {settingsError && (
                 <div className="mb-2 text-[11px] text-amber-700">{settingsError}</div>
@@ -721,19 +853,27 @@ export default function MicroserviceGeneralTab({
                 <div className="mb-2 text-[11px] text-emerald-700">{settingsSuccess}</div>
               )}
               {!settingsError && settings && (
-                <table className="min-w-[200px] text-[11px] text-slate-700">
+                <table className="min-w-full text-[11px] text-slate-700">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wide text-slate-500">
+                      <th className="py-2 pr-3">Key</th>
+                      <th className="py-2 pr-3">Descrizione</th>
+                      <th className="py-2">Value</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {Object.entries(editableSettings).map(([key, val]) => (
-                      <tr key={key} className="border-t border-slate-100 first:border-t-0">
-                        <td className="pr-3 font-semibold text-slate-600 align-top">{key}</td>
-                        <td className="py-1">
+                    {visibleDbSettingsRows.map((row) => (
+                      <tr key={row.key} className="border-t border-slate-100 first:border-t-0 align-top">
+                        <td className="py-2 pr-3 font-semibold text-slate-600">{row.key}</td>
+                        <td className="py-2 pr-3 text-slate-600">{row.description || "-"}</td>
+                        <td className="py-2">
                           <input
                             className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
-                            value={val}
+                            value={editableSettings[row.key] ?? row.value}
                             onChange={(e) =>
                               setEditableSettings((prev) => ({
                                 ...prev,
-                                [key]: e.target.value,
+                                [row.key]: e.target.value,
                               }))
                             }
                             disabled={savingSettings}
@@ -743,6 +883,9 @@ export default function MicroserviceGeneralTab({
                     ))}
                   </tbody>
                 </table>
+              )}
+              {!settingsError && settings && visibleDbSettingsRows.length === 0 && (
+                <div className="text-[11px] text-slate-500">Nessun setting trovato</div>
               )}
               {saveSettingsError && (
                 <div className="mt-2 text-[11px] text-amber-700">{saveSettingsError}</div>
@@ -762,13 +905,14 @@ export default function MicroserviceGeneralTab({
                   setSettingsSuccess(null);
                   try {
                     await reloadCacheSettings();
-                    const data = await fetchCacheSettings();
+                    const [data, metadata] = await Promise.all([fetchCacheSettings(), loadSettingsMetadata()]);
                     setSettings(data);
                     const obj: Record<string, string> = {};
                     Object.entries(data || {}).forEach(([k, v]) => {
                       obj[k] = v != null ? String(v) : "";
                     });
                     setEditableSettings(obj);
+                    setDbSettingsRows(buildDbSettingsRows(data as Record<string, unknown>, metadata));
                     setSettingsStatus("idle");
                     setSettingsSuccess("Settings ricaricati dal DB");
                   } catch (err: any) {
@@ -791,8 +935,11 @@ export default function MicroserviceGeneralTab({
                   setSettingsSuccess(null);
                   setSavingSettings(true);
                   try {
+                    const visibleKeys = new Set(
+                      visibleDbSettingsRows.map((row) => row.key)
+                    );
                     const changes = Object.entries(editableSettings).filter(
-                      ([k, v]) => String(settings?.[k] ?? "") !== v
+                      ([k, v]) => visibleKeys.has(k) && String(settings?.[k] ?? "") !== v
                     );
                     for (const [key, value] of changes) {
                       await updateCacheSetting(key, value);

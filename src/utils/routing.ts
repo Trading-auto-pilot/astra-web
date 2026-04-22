@@ -100,6 +100,7 @@ export const getPermissionKey = (hash: string): string => {
     if (section === "api_key") return "admin/api_key";
     if (section === "logs") return "admin/logs";
     if (section === "microservice") return "admin/microservice";
+    if (section === "simulator") return "admin/microservice";
     if (section === "alerts") return "admin/alerts";
     if (section === "capital-allocation") return "admin/capital-allocation";
     return "admin";
@@ -129,6 +130,7 @@ export const normalizeClientNavPage = (page: string): string => {
   if (cleaned === "admin/scheduler") return "admin/scheduler";
   if (cleaned === "admin/api_key") return "admin/api_key";
   if (cleaned === "admin/microservice") return "admin/microservice";
+  if (cleaned === "admin/simulator") return "admin/microservice";
 
   // Backward-compatible fallbacks
   if (cleaned === "tickers") return "dashboard/tickers";
@@ -137,6 +139,7 @@ export const normalizeClientNavPage = (page: string): string => {
   if (cleaned === "users") return "admin/users";
   if (cleaned === "scheduler") return "admin/scheduler";
   if (cleaned === "microservice") return "admin/microservice";
+  if (cleaned === "simulator") return "admin/microservice";
   if (cleaned === "api_key") return "admin/api_key";
 
   return cleaned;

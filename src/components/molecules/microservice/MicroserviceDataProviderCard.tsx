@@ -29,7 +29,7 @@ export default function MicroserviceDataProviderCard({
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Radio buttons per la selezione del provider */}
-                  {["AUTO", "ALPACA", "POLYGON", "FMP", "IBKR"].map((opt) => (
+                  {["AUTO", "IBKR", "ALPACA", "POLYGON", "YAHOO", "FMP"].map((opt) => (
                     <label key={opt} className="inline-flex items-center gap-2 text-xs text-slate-700">
                       <input
                         type="radio"
@@ -49,7 +49,7 @@ export default function MicroserviceDataProviderCard({
                   )}
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  <span className="font-medium">AUTO</span> = routing Alpaca → Polygon → IBKR → FMP (default).
+                  <span className="font-medium">AUTO</span> = catena automatica IBKR → Yahoo → FMP. Provider specifico = nessun fallback.
                 </div>
               </div>
             </td>

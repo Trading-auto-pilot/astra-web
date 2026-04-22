@@ -12,6 +12,7 @@ import AdminMicroservicePage from "./AdminMicroservicePage";
 import AdminMicroserviceDetailPage from "./AdminMicroserviceDetailPage";
 import UserSettingsPage from "./UserSettingsPage";
 import CapitalAllocationPage from "./CapitalAllocationPage";
+import SimulatorPage from "./SimulatorPage";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { env } from "../../config/env";
@@ -50,6 +51,7 @@ type AppSection =
   | "alerts"
   | "microservice"
   | "capitalAllocation"
+  | "simulator"
   | "userSettings";
 
 const getAppSection = (): AppSection => {
@@ -74,6 +76,7 @@ const getAppSection = (): AppSection => {
     if (parts[1] === "alerts") return "alerts";
     if (parts[1] === "microservice") return "microservice";
     if (parts[1] === "capital-allocation") return "capitalAllocation";
+    if (parts[1] === "simulator") return "simulator";
     return "overview";
   }
 
@@ -406,6 +409,10 @@ export function DashboardPage({ extraContent, userName, navEntries }: DashboardP
         <CapitalAllocationPage />
       </DashboardLayout>
     );
+  }
+
+  if (section === "simulator") {
+    return <SimulatorPage userName={userName} navEntries={navEntries} />;
   }
 
   if (section === "microservice") {

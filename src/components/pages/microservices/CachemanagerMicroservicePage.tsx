@@ -272,7 +272,7 @@ export default function CachemanagerMicroservicePage({
   onOpenReleaseModal,
 }: Props) {
   // Gestione tab attivo
-  const [activeTab, setActiveTab] = useState<"general" | "specific" | "cache" | "l2" | "l2-hygiene">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "specific" | "cache" | "l2" | "l2-hygiene" | "analysis">("general");
 
   // ========== STATO PER TAB "SPECIFIC" (Get Candle) ==========
 
@@ -290,7 +290,7 @@ export default function CachemanagerMicroservicePage({
   const [candleTab, setCandleTab] = useState<"table" | "chart">("table");
 
   // Stato del provider di dati (gestito anche nel tab General tramite MicroserviceGeneralTab)
-  const [provider, setProvider] = useState<"FMP" | "ALPACA" | "IBKR" | "">("");
+  const [provider, setProvider] = useState<"AUTO" | "IBKR" | "ALPACA" | "POLYGON" | "YAHOO" | "FMP" | "">("");
   const [providerStatus, setProviderStatus] = useState<Status>("idle");
   const [providerError, setProviderError] = useState<string | null>(null);
 
@@ -309,6 +309,7 @@ export default function CachemanagerMicroservicePage({
   const [l2Status, setL2Status] = useState<Status>("idle");
   const [l2Error, setL2Error] = useState<string | null>(null);
   const [l2Expanded, setL2Expanded] = useState<Record<string, boolean>>({});
+  const [l2ExExpanded, setL2ExExpanded] = useState<Record<string, boolean>>({});
   const [l2TfExpanded, setL2TfExpanded] = useState<Record<string, boolean>>({});
   const [l2Letter, setL2Letter] = useState<string | null>(null);
   const [l2Search, setL2Search] = useState<string>("");
@@ -402,9 +403,9 @@ export default function CachemanagerMicroservicePage({
       });
   }, []);
 
-  // Carica L2 size quando si apre il tab L2
+  // Carica L2 size quando si apre il tab L2 o Analysis
   useEffect(() => {
-    if (activeTab !== "l2") return;
+    if (activeTab !== "l2" && activeTab !== "analysis") return;
     const token = typeof localStorage !== "undefined" ? localStorage.getItem("astraai:auth:token") : null;
     setL2Status("loading");
     fetch(`${env.apiBaseUrl}/cachemanager/status/L2/size`, {
@@ -846,6 +847,17 @@ export default function CachemanagerMicroservicePage({
         >
           L2-hygiene
         </button>
+
+        {/* Tab Analysis */}
+        <button
+          type="button"
+          className={`pb-2 text-xs font-semibold transition ${
+            activeTab === "analysis" ? "border-b-2 border-slate-900 text-slate-900" : "text-slate-500"
+          }`}
+          onClick={() => setActiveTab("analysis")}
+        >
+          Analysis
+        </button>
       </div>
 
       {/* CONTENUTO DEI TAB */}
@@ -883,7 +895,7 @@ export default function CachemanagerMicroservicePage({
               <div className="flex items-center gap-2 text-[11px] text-slate-700">
                 <span className="font-semibold">Provider</span>
                 {/* Radio buttons per selezionare il provider */}
-                {["FMP", "ALPACA", "IBKR"].map((prov) => (
+                {(["AUTO", "IBKR", "ALPACA", "POLYGON", "YAHOO", "FMP"] as const).map((prov) => (
                   <label key={prov} className="inline-flex items-center gap-1">
                     <input
                       type="radio"
@@ -906,7 +918,7 @@ export default function CachemanagerMicroservicePage({
                           const data = await res.json().catch(() => ({}));
                           if (!res.ok || data?.ok === false)
                             throw new Error(data?.error || data?.message || "Errore set provider");
-                          setProvider(prov as any);
+                          setProvider(prov);
                           setProviderStatus("idle");
                         } catch (err: any) {
                           setProviderStatus("error");
@@ -915,10 +927,13 @@ export default function CachemanagerMicroservicePage({
                       }}
                       className="h-3 w-3"
                     />
-                    <span>{prov === "ALPACA" ? "Alpaca" : prov}</span>
+                    <span className={prov === "AUTO" ? "font-semibold text-blue-700" : ""}>{prov}</span>
                   </label>
                 ))}
                 {providerStatus === "loading" && <span className="text-slate-500">Aggiornamento...</span>}
+                {provider === "AUTO" && (
+                  <span className="text-[10px] text-slate-400">IBKR → Yahoo → FMP</span>
+                )}
               </div>
             </div>
             {providerError && <div className="mb-2 text-[11px] text-red-600">{providerError}</div>}
@@ -1690,7 +1705,7 @@ export default function CachemanagerMicroservicePage({
                               typeof first?.path === "string"
                                 ? first.path.split(/[/\\]/).filter(Boolean).pop() || ""
                                 : "";
-                            const match = /^(\d{4})-(\d{2})_(.+)\.json$/i.exec(childName);
+                            const match = /^(\d{4})-(\d{2})_([^_]+)(?:_([A-Z]{2,}))?\.json$/i.exec(childName);
                             return match?.[3] || "";
                           })();
                           return (
@@ -1768,190 +1783,223 @@ export default function CachemanagerMicroservicePage({
                                 </td>
                               </tr>
                               {expanded && (() => {
-                                // Group children by tf
-                                const tfGroups: Record<string, Array<{ child: any; childName: string; childYear: number; childMonth: number }>> = {};
+                                // Parse filename: YYYY-MM_tf[_EXCHANGE].json
+                                const FILE_RE = /^(\d{4})-(\d{2})_([^_]+)(?:_([A-Z]{2,}))?\.json$/i;
+                                type FileEntry = { child: any; childName: string; childYear: number; childMonth: number; childTf: string };
+                                // Group: exchange → tf → files
+                                const exGroups: Record<string, Record<string, FileEntry[]>> = {};
                                 for (const [cIdx, child] of children.entries()) {
                                   const childName =
                                     typeof child?.path === "string"
                                       ? child.path.split(/[/\\]/).filter(Boolean).pop() || child.path
                                       : `child-${cIdx}`;
-                                  const childTfMatch = /^(\d{4})-(\d{2})_(.+)\.json$/i.exec(childName);
-                                  const childTf = childTfMatch ? childTfMatch[3].toLowerCase() : "_unknown";
-                                  const childYear = childTfMatch ? Number(childTfMatch[1]) : 0;
-                                  const childMonth = childTfMatch ? Number(childTfMatch[2]) : 0;
-                                  if (!tfGroups[childTf]) tfGroups[childTf] = [];
-                                  tfGroups[childTf].push({ child, childName, childYear, childMonth });
+                                  const m = FILE_RE.exec(childName);
+                                  const childYear = m ? Number(m[1]) : 0;
+                                  const childMonth = m ? Number(m[2]) : 0;
+                                  const childTf = m ? m[3].toLowerCase() : "_unknown";
+                                  const childExchange = m?.[4]?.toUpperCase() || "legacy";
+                                  if (!exGroups[childExchange]) exGroups[childExchange] = {};
+                                  if (!exGroups[childExchange][childTf]) exGroups[childExchange][childTf] = [];
+                                  exGroups[childExchange][childTf].push({ child, childName, childYear, childMonth, childTf });
                                 }
-                                return Object.entries(tfGroups).map(([tf, files]) => {
-                                  const tfKey = `${name}|||${tf}`;
-                                  const tfExpanded = !!l2TfExpanded[tfKey];
-                                  // Considera solo i record DB che corrispondono a file fisicamente presenti in cache
-                                  const tfScores = files
-                                    .map(({ childYear, childMonth }) =>
-                                      l2QualityFiles[name]?.find(
-                                        (f) => f.tf === tf && Number(f.year) === childYear && Number(f.month) === childMonth
-                                      )?.quality_score
-                                    )
-                                    .filter((s): s is number => s !== undefined)
-                                    .map(Number);
-                                  const tfMinScore = tfScores.length > 0 ? Math.min(...tfScores) : undefined;
-                                  const tfLoading = l2QualityFilesLoading[name] ?? false;
+                                return Object.entries(exGroups).sort(([a], [b]) => a.localeCompare(b)).map(([exchange, tfGroups]) => {
+                                  const exKey = `${name}|||${exchange}`;
+                                  const exExpanded = !!l2ExExpanded[exKey];
+                                  const allExFiles = Object.values(tfGroups).flat();
                                   return (
-                                    <React.Fragment key={tfKey}>
-                                      {/* TF header row */}
+                                    <React.Fragment key={exKey}>
+                                      {/* Exchange header row */}
                                       <tr
-                                        className="bg-slate-100/80 hover:bg-slate-100 cursor-pointer"
-                                        onClick={() => setL2TfExpanded((prev) => ({ ...prev, [tfKey]: !tfExpanded }))}
+                                        className="bg-sky-50/70 hover:bg-sky-100/60 cursor-pointer"
+                                        onClick={() => setL2ExExpanded((prev) => ({ ...prev, [exKey]: !exExpanded }))}
                                       >
-                                        <td className="px-8 py-1.5 font-medium text-slate-700">
+                                        <td className="px-6 py-1.5" colSpan={4}>
                                           <span className="inline-flex items-center gap-1.5">
                                             <AppIcon
-                                              icon={tfExpanded ? "mdi:chevron-down" : "mdi:chevron-right"}
-                                              width={12} height={12}
+                                              icon={exExpanded ? "mdi:chevron-down" : "mdi:chevron-right"}
+                                              width={12} height={12} className="text-sky-500"
                                             />
-                                            {tfLoading ? (
-                                              <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-300 animate-pulse" title="Caricamento score..." />
-                                            ) : tfMinScore !== undefined ? (
-                                              <span
-                                                className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${tfMinScore >= 90 ? "bg-green-500" : tfMinScore >= 70 ? "bg-amber-400" : "bg-red-500"}`}
-                                                title={`Min quality score: ${tfMinScore.toFixed(1)}`}
-                                              />
-                                            ) : l2QualityFiles[name] !== undefined ? (
-                                              <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-400" title="Non scansionato" />
-                                            ) : null}
-                                            <span className="uppercase">{tf}</span>
-                                            <span className="text-slate-400 text-[10px]">({files.length} file)</span>
+                                            <span className={`inline-block rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wider ${exchange === "legacy" ? "bg-slate-200 text-slate-500" : "bg-sky-100 text-sky-700"}`}>
+                                              {exchange}
+                                            </span>
+                                            <span className="text-slate-400 text-[10px]">
+                                              {allExFiles.length} file · {Object.keys(tfGroups).length} TF
+                                            </span>
                                           </span>
                                         </td>
-                                        <td className="px-3 py-1.5" colSpan={3} />
                                       </tr>
-                                      {/* File rows under this TF */}
-                                      {tfExpanded && files.map(({ child, childName, childYear, childMonth }) => {
-                                        const childBytes = getNodeBytes(child);
-                                        const pctChild = entryBytes > 0 ? (childBytes / entryBytes) * 100 : 0;
-                                        // Prima cerca match esatto per year+month (dati atomici)
-                                        // Se non trovato (dati legacy senza year/month), usa il dato TF-level come fallback
-                                        const childFileEntry = l2QualityFiles[name]?.find(
-                                          (f) => f.tf === tf && Number(f.year) === childYear && Number(f.month) === childMonth
-                                        ) ?? l2QualityFiles[name]?.find(
-                                          (f) => f.tf === tf && f.year == null
-                                        );
-                                        const childScore: number | undefined = childFileEntry?.quality_score !== undefined ? Number(childFileEntry.quality_score) : undefined;
-                                        const computedChildScoreLoading = l2QualityFilesLoading[name] ?? false;
+                                      {/* TF rows under this exchange */}
+                                      {exExpanded && Object.entries(tfGroups).map(([tf, files]) => {
+                                        const tfKey = `${name}|||${exchange}|||${tf}`;
+                                        const tfExpanded = !!l2TfExpanded[tfKey];
+                                        const tfScores = files
+                                          .map(({ childYear, childMonth }) =>
+                                            l2QualityFiles[name]?.find(
+                                              (f) => f.tf === tf && Number(f.year) === childYear && Number(f.month) === childMonth
+                                            )?.quality_score
+                                          )
+                                          .filter((s): s is number => s !== undefined)
+                                          .map(Number);
+                                        const tfMinScore = tfScores.length > 0 ? Math.min(...tfScores) : undefined;
+                                        const tfLoading = l2QualityFilesLoading[name] ?? false;
                                         return (
-                                          <tr key={`${name}-${childName}`} className="bg-slate-50">
-                                            <td className="px-12 py-1 text-slate-700">
-                                              <span className="inline-flex items-center gap-2">
-                                                {computedChildScoreLoading ? (
-                                                  <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-300 animate-pulse" title="Caricamento score..." />
-                                                ) : childScore !== undefined ? (
-                                                  <span
-                                                    className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${childScore >= 90 ? "bg-green-500" : childScore >= 70 ? "bg-amber-400" : "bg-red-500"}`}
-                                                    title={`Quality score: ${childScore.toFixed(1)}`}
+                                          <React.Fragment key={tfKey}>
+                                            {/* TF header row */}
+                                            <tr
+                                              className="bg-slate-100/80 hover:bg-slate-100 cursor-pointer"
+                                              onClick={() => setL2TfExpanded((prev) => ({ ...prev, [tfKey]: !tfExpanded }))}
+                                            >
+                                              <td className="px-10 py-1.5 font-medium text-slate-700">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                  <AppIcon
+                                                    icon={tfExpanded ? "mdi:chevron-down" : "mdi:chevron-right"}
+                                                    width={12} height={12}
                                                   />
-                                                ) : l2QualityFiles[name] !== undefined ? (
-                                                  <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-400" title="Non scansionato" />
-                                                ) : null}
-                                                <span>{childName}</span>
-                                              </span>
-                                            </td>
-                                            <td className="px-3 py-1">
-                                              <div className="flex items-center gap-2">
-                                                <div className="relative h-2 w-full rounded-full bg-slate-100">
-                                                  <div
-                                                    className={`absolute left-0 top-0 h-2 rounded-full ${progressColor(pctChild)}`}
-                                                    style={{ width: `${Math.min(100, Math.max(0, pctChild))}%` }}
-                                                  />
-                                                </div>
-                                                <span className="whitespace-nowrap text-[11px] text-slate-600">
-                                                  {pctChild.toFixed(1)}%
+                                                  {tfLoading ? (
+                                                    <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-300 animate-pulse" title="Caricamento score..." />
+                                                  ) : tfMinScore !== undefined ? (
+                                                    <span
+                                                      className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${tfMinScore >= 90 ? "bg-green-500" : tfMinScore >= 70 ? "bg-amber-400" : "bg-red-500"}`}
+                                                      title={`Min quality score: ${tfMinScore.toFixed(1)}`}
+                                                    />
+                                                  ) : l2QualityFiles[name] !== undefined ? (
+                                                    <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-400" title="Non scansionato" />
+                                                  ) : null}
+                                                  <span className="uppercase">{tf}</span>
+                                                  <span className="text-slate-400 text-[10px]">({files.length} file)</span>
                                                 </span>
-                                              </div>
-                                            </td>
-                                            <td className="px-3 py-1 text-right whitespace-nowrap">
-                                              {formatBytes(childBytes)}
-                                            </td>
-                                            <td className="px-2 py-1 text-right">
-                                              <div className="inline-flex items-center gap-1">
-                                                <button
-                                                  type="button"
-                                                  className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
-                                                  onClick={async (e) => {
-                                                    e.stopPropagation();
-                                                    const match = /^(\d{4})-(\d{2})_(.+)\.json$/i.exec(childName || "");
-                                                    const year = match?.[1];
-                                                    const month = match?.[2];
-                                                    const fileTf = match?.[3];
-                                                    const token =
-                                                      typeof localStorage !== "undefined"
-                                                        ? localStorage.getItem("astraai:auth:token")
-                                                        : null;
-                                                    setL2FileName(childName);
-                                                    setL2FileError(null);
-                                                    setL2FileData(null);
-                                                    setL2FileMeta(null);
-                                                    setL2FileTab("json");
-                                                    setL2FileTimeFilter("");
-                                                    setL2FileStatus("loading");
-                                                    setShowL2FileModal(true);
-                                                    try {
-                                                      const params = new URLSearchParams();
-                                                      const requestParams: Record<string, string> = {};
-                                                      if (year && month && fileTf) {
-                                                        params.set("symbol", name);
-                                                        params.set("year", year);
-                                                        params.set("month", month);
-                                                        params.set("tf", fileTf);
-                                                        requestParams.symbol = name;
-                                                        requestParams.year = year;
-                                                        requestParams.month = month;
-                                                        requestParams.tf = fileTf;
-                                                      } else {
-                                                        params.set("fileName", `${name}/${childName}`);
-                                                        requestParams.fileName = `${name}/${childName}`;
-                                                      }
-                                                      const res = await fetch(
-                                                        `${env.apiBaseUrl}/cachemanager/l2/file?${params.toString()}`,
-                                                        {
-                                                          method: "GET",
-                                                          headers: {
-                                                            "Content-Type": "application/json",
-                                                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                                                          },
-                                                        }
-                                                      );
-                                                      const data = await res.json().catch(() => ({}));
-                                                      if (!res.ok || data?.ok === false) {
-                                                        throw new Error(data?.error || data?.message || "Errore lettura file");
-                                                      }
-                                                      setL2FileData(data?.data ?? data);
-                                                      setL2FileMeta(data?.meta ?? null);
-                                                      setL2FileRequest(requestParams);
-                                                      setL2FileStatus("idle");
-                                                    } catch (err: any) {
-                                                      setL2FileStatus("error");
-                                                      setL2FileError(err?.message || "Errore lettura file");
-                                                    }
-                                                  }}
-                                                  aria-label={`Visualizza ${childName}`}
-                                                >
-                                                  <AppIcon icon="mdi:eye-outline" width={14} height={14} />
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  className="rounded-full p-1 text-red-500 hover:bg-red-50"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setL2DeleteTarget({ type: "file", symbol: name, tf: childName });
-                                                    setShowL2Confirm(true);
-                                                  }}
-                                                  aria-label={`Cancella ${childName}`}
-                                                >
-                                                  <AppIcon icon="mdi:trash-can-outline" width={14} height={14} />
-                                                </button>
-                                              </div>
-                                            </td>
-                                          </tr>
+                                              </td>
+                                              <td className="px-3 py-1.5" colSpan={3} />
+                                            </tr>
+                                            {/* File rows under this TF */}
+                                            {tfExpanded && files.map(({ child, childName, childYear, childMonth }) => {
+                                              const childBytes = getNodeBytes(child);
+                                              const pctChild = entryBytes > 0 ? (childBytes / entryBytes) * 100 : 0;
+                                              const childFileEntry = l2QualityFiles[name]?.find(
+                                                (f) => f.tf === tf && Number(f.year) === childYear && Number(f.month) === childMonth
+                                              ) ?? l2QualityFiles[name]?.find(
+                                                (f) => f.tf === tf && f.year == null
+                                              );
+                                              const childScore: number | undefined = childFileEntry?.quality_score !== undefined ? Number(childFileEntry.quality_score) : undefined;
+                                              const computedChildScoreLoading = l2QualityFilesLoading[name] ?? false;
+                                              return (
+                                                <tr key={`${name}-${childName}`} className="bg-slate-50">
+                                                  <td className="px-14 py-1 text-slate-700">
+                                                    <span className="inline-flex items-center gap-2">
+                                                      {computedChildScoreLoading ? (
+                                                        <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-300 animate-pulse" title="Caricamento score..." />
+                                                      ) : childScore !== undefined ? (
+                                                        <span
+                                                          className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${childScore >= 90 ? "bg-green-500" : childScore >= 70 ? "bg-amber-400" : "bg-red-500"}`}
+                                                          title={`Quality score: ${childScore.toFixed(1)}`}
+                                                        />
+                                                      ) : l2QualityFiles[name] !== undefined ? (
+                                                        <span className="h-1.5 w-1.5 rounded-full flex-shrink-0 bg-slate-400" title="Non scansionato" />
+                                                      ) : null}
+                                                      <span>{childName}</span>
+                                                    </span>
+                                                  </td>
+                                                  <td className="px-3 py-1">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="relative h-2 w-full rounded-full bg-slate-100">
+                                                        <div
+                                                          className={`absolute left-0 top-0 h-2 rounded-full ${progressColor(pctChild)}`}
+                                                          style={{ width: `${Math.min(100, Math.max(0, pctChild))}%` }}
+                                                        />
+                                                      </div>
+                                                      <span className="whitespace-nowrap text-[11px] text-slate-600">
+                                                        {pctChild.toFixed(1)}%
+                                                      </span>
+                                                    </div>
+                                                  </td>
+                                                  <td className="px-3 py-1 text-right whitespace-nowrap">
+                                                    {formatBytes(childBytes)}
+                                                  </td>
+                                                  <td className="px-2 py-1 text-right">
+                                                    <div className="inline-flex items-center gap-1">
+                                                      <button
+                                                        type="button"
+                                                        className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                                                        onClick={async (e) => {
+                                                          e.stopPropagation();
+                                                          const token =
+                                                            typeof localStorage !== "undefined"
+                                                              ? localStorage.getItem("astraai:auth:token")
+                                                              : null;
+                                                          setL2FileName(childName);
+                                                          setL2FileError(null);
+                                                          setL2FileData(null);
+                                                          setL2FileMeta(null);
+                                                          setL2FileTab("json");
+                                                          setL2FileTimeFilter("");
+                                                          setL2FileStatus("loading");
+                                                          setShowL2FileModal(true);
+                                                          try {
+                                                            const params = new URLSearchParams();
+                                                            const requestParams: Record<string, string> = {};
+                                                            // For exchange-specific files use fileName directly,
+                                                            // otherwise use year/month/tf params.
+                                                            if (exchange !== "legacy" && childYear && childMonth) {
+                                                              params.set("fileName", `${name}/${childName}`);
+                                                              requestParams.fileName = `${name}/${childName}`;
+                                                            } else if (childYear && childMonth && tf) {
+                                                              params.set("symbol", name);
+                                                              params.set("year", String(childYear));
+                                                              params.set("month", String(childMonth));
+                                                              params.set("tf", tf);
+                                                              requestParams.symbol = name;
+                                                              requestParams.year = String(childYear);
+                                                              requestParams.month = String(childMonth);
+                                                              requestParams.tf = tf;
+                                                            } else {
+                                                              params.set("fileName", `${name}/${childName}`);
+                                                              requestParams.fileName = `${name}/${childName}`;
+                                                            }
+                                                            const res = await fetch(
+                                                              `${env.apiBaseUrl}/cachemanager/l2/file?${params.toString()}`,
+                                                              {
+                                                                method: "GET",
+                                                                headers: {
+                                                                  "Content-Type": "application/json",
+                                                                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                                                                },
+                                                              }
+                                                            );
+                                                            const data = await res.json().catch(() => ({}));
+                                                            if (!res.ok || data?.ok === false) {
+                                                              throw new Error(data?.error || data?.message || "Errore lettura file");
+                                                            }
+                                                            setL2FileData(data?.data ?? data);
+                                                            setL2FileMeta(data?.meta ?? null);
+                                                            setL2FileRequest(requestParams);
+                                                            setL2FileStatus("idle");
+                                                          } catch (err: any) {
+                                                            setL2FileStatus("error");
+                                                            setL2FileError(err?.message || "Errore lettura file");
+                                                          }
+                                                        }}
+                                                        aria-label={`Visualizza ${childName}`}
+                                                      >
+                                                        <AppIcon icon="mdi:eye-outline" width={14} height={14} />
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        className="rounded-full p-1 text-red-500 hover:bg-red-50"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          setL2DeleteTarget({ type: "file", symbol: name, tf: childName });
+                                                          setShowL2Confirm(true);
+                                                        }}
+                                                        aria-label={`Cancella ${childName}`}
+                                                      >
+                                                        <AppIcon icon="mdi:trash-can-outline" width={14} height={14} />
+                                                      </button>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </React.Fragment>
                                         );
                                       })}
                                     </React.Fragment>
@@ -3000,6 +3048,175 @@ export default function CachemanagerMicroservicePage({
           </div>
         </div>
       )}
+
+      {/* Tab Analysis: donut chart tickers per exchange */}
+      {activeTab === "analysis" && (
+        <div className="flex-1 min-h-0 overflow-y-auto mt-4 space-y-4">
+          {l2Status === "loading" && (
+            <div className="text-xs text-slate-500">Caricamento dati L2...</div>
+          )}
+          {l2Status === "error" && l2Error && (
+            <Alert message={l2Error} tone="error" />
+          )}
+          {l2Size && (() => {
+            const FILE_RE = /^(\d{4})-(\d{2})_([^_]+)(?:_([A-Z]{2,}))?\.json$/i;
+            const exchangeSymbols: Record<string, Set<string>> = {};
+
+            const rawEntries = Array.isArray(l2Size?.tree?.files) ? l2Size.tree.files : [];
+            for (const entry of rawEntries) {
+              const symName =
+                typeof entry?.path === "string"
+                  ? entry.path.split(/[/\\]/).filter(Boolean).pop() || ""
+                  : "";
+              if (!symName || symName.toLowerCase().endsWith(".ds_store")) continue;
+
+              const children: any[] = Array.isArray(entry?.files) ? entry.files : [];
+              const symExchanges = new Set<string>();
+              for (const child of children) {
+                const childName =
+                  typeof child?.path === "string"
+                    ? child.path.split(/[/\\]/).filter(Boolean).pop() || ""
+                    : "";
+                const m = FILE_RE.exec(childName);
+                if (!m) continue;
+                const ex = m[4]?.toUpperCase() || "legacy";
+                symExchanges.add(ex);
+              }
+              for (const ex of symExchanges) {
+                if (!exchangeSymbols[ex]) exchangeSymbols[ex] = new Set();
+                exchangeSymbols[ex].add(symName);
+              }
+            }
+
+            const exchangeData = Object.entries(exchangeSymbols)
+              .map(([exchange, syms]) => ({ exchange, count: syms.size }))
+              .sort((a, b) => b.count - a.count);
+
+            const labels = exchangeData.map((d) => d.exchange);
+            const series = exchangeData.map((d) => d.count);
+            const total = series.reduce((s, v) => s + v, 0);
+
+            const PALETTE = [
+              "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
+              "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#6366f1",
+              "#14b8a6", "#a855f7", "#fb923c", "#22d3ee", "#e879f9",
+            ];
+            const colors = labels.map((_, i) => PALETTE[i % PALETTE.length]);
+
+            if (exchangeData.length === 0) {
+              return (
+                <div className="rounded-lg border border-slate-200 bg-white px-4 py-6 text-center text-xs text-slate-400">
+                  Nessun file L2 trovato. Apri prima il tab L2 per caricare i dati.
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-2 gap-4">
+                {/* Donut chart */}
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-1 text-xs font-semibold text-slate-700">Tickers per Exchange</div>
+                  <div className="mb-3 text-[11px] text-slate-400">{total} simboli totali in cache L2</div>
+                  <ReactApexChart
+                    type="donut"
+                    height={300}
+                    series={series}
+                    options={{
+                      chart: { toolbar: { show: false } },
+                      labels,
+                      colors,
+                      legend: { position: "bottom", fontSize: "11px", fontFamily: "inherit" },
+                      plotOptions: {
+                        pie: {
+                          donut: {
+                            size: "58%",
+                            labels: {
+                              show: true,
+                              total: {
+                                show: true,
+                                label: "Totale",
+                                fontSize: "12px",
+                                fontFamily: "inherit",
+                                formatter: () => String(total),
+                              },
+                            },
+                          },
+                          expandOnClick: true,
+                        },
+                      },
+                      stroke: { width: 1, colors: ["#fff"] },
+                      tooltip: { y: { formatter: (v: number) => `${v} ticker` } },
+                      dataLabels: { enabled: series.length <= 8, style: { fontSize: "11px" } },
+                    }}
+                  />
+                </div>
+
+                {/* Tabella dettaglio */}
+                <div className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-3 text-xs font-semibold text-slate-700">Dettaglio</div>
+                  <table className="min-w-full text-[11px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400">
+                        <th className="pb-2 text-left">Exchange</th>
+                        <th className="pb-2 text-right">Tickers</th>
+                        <th className="pb-2 text-right">%</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {exchangeData.map(({ exchange, count }, i) => {
+                        const pct = total > 0 ? (count / total) * 100 : 0;
+                        return (
+                          <tr key={exchange} className="hover:bg-slate-50">
+                            <td className="py-1.5">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span
+                                  className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
+                                  style={{ background: colors[i] }}
+                                />
+                                <span
+                                  className={
+                                    exchange === "legacy"
+                                      ? "text-slate-400"
+                                      : exchange === "SIP"
+                                        ? "font-semibold text-blue-700"
+                                        : "font-semibold text-slate-700"
+                                  }
+                                >
+                                  {exchange}
+                                </span>
+                                {exchange === "SIP" && (
+                                  <span className="rounded bg-blue-50 px-1 py-0 text-[9px] font-semibold uppercase tracking-wide text-blue-500">
+                                    US
+                                  </span>
+                                )}
+                                {exchange === "legacy" && (
+                                  <span className="rounded bg-slate-100 px-1 py-0 text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+                                    no suffix
+                                  </span>
+                                )}
+                              </span>
+                            </td>
+                            <td className="py-1.5 text-right font-semibold text-slate-800">{count}</td>
+                            <td className="py-1.5 text-right text-slate-400">{pct.toFixed(1)}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-slate-200">
+                        <td className="pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Totale</td>
+                        <td className="pt-2 text-right font-semibold text-slate-800">{total}</td>
+                        <td className="pt-2 text-right text-slate-400">100%</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
     </div>
   );
 }

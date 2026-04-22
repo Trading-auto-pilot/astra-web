@@ -23,6 +23,11 @@ type Props = {
   limit?: number;
   fillHeight?: boolean;
   className?: string;
+  initialMessageQuery?: string;
+  storageScope?: string;
+  initialLevel?: string;
+  initialService?: string;
+  initialPageSize?: number;
 };
 
 const getToken = () => {
@@ -112,6 +117,7 @@ const serviceOptions = [
   "scheduler",
   "servicecontrolplane",
   "shared",
+  "simulator",
   "tickerscanner",
 ];
 
@@ -133,6 +139,11 @@ export default function MicroserviceLogsCard({
   limit = 15,
   fillHeight = false,
   className = "",
+  initialMessageQuery,
+  storageScope,
+  initialLevel,
+  initialService,
+  initialPageSize,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [rows, setRows] = useState<LogRow[]>([]);
@@ -142,9 +153,9 @@ export default function MicroserviceLogsCard({
   const [wsError, setWsError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
-  const [pageSize, setPageSize] = useState<number>(limit || 15);
+  const [pageSize, setPageSize] = useState<number>(initialPageSize || limit || 15);
   const [onlyThisService, setOnlyThisService] = useState(false);
-  const [selectedService, setSelectedService] = useState<string>("all");
+  const [selectedService, setSelectedService] = useState<string>(initialService || "all");
   const [selectedModule, setSelectedModule] = useState<string>("all");
   const [selectedFunction, setSelectedFunction] = useState<string>("all");
   const [dateStart, setDateStart] = useState<string>("");
@@ -153,12 +164,19 @@ export default function MicroserviceLogsCard({
   const [dateEndDraft, setDateEndDraft] = useState<string>("");
   const [messageQuery, setMessageQuery] = useState<string>("");
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [levelFilter, setLevelFilter] = useState<LevelKey>("log");
+  const [levelFilter, setLevelFilter] = useState<LevelKey>(normalizeLevel(initialLevel) || "log");
   const [timeZone, setTimeZone] = useState<"UTC" | "Asia/Dubai">("UTC");
   const token = useMemo(() => getToken(), []);
   const storageKey = useMemo(
-    () => `astraai:logs:filters:${microservice ? String(microservice).toLowerCase() : "all"}`,
-    [microservice]
+    () =>
+      `astraai:logs:filters:${
+        storageScope
+          ? String(storageScope).toLowerCase()
+          : microservice
+            ? String(microservice).toLowerCase()
+            : "all"
+      }`,
+    [microservice, storageScope]
   );
   const [isExpanded, setIsExpanded] = useState(false);
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -195,35 +213,8 @@ export default function MicroserviceLogsCard({
     template: "Alert: {{message}}",
   });
 
-  const normalizeJsonDetail = (value: any) => {
-    if (value === null || value === undefined) return null;
-    if (typeof value !== "string") return value;
-
-    let current: any = value.trim();
-    if (!current) return value;
-
-    // Parse string payloads only when they are valid JSON.
-    for (let i = 0; i < 2 && typeof current === "string"; i += 1) {
-      const probe = current.trim();
-      if (!probe) break;
-      const startsLikeJson =
-        probe.startsWith("{") ||
-        probe.startsWith("[") ||
-        probe.startsWith("\"{") ||
-        probe.startsWith("\"[");
-      if (!startsLikeJson) break;
-      try {
-        current = JSON.parse(probe);
-      } catch {
-        break;
-      }
-    }
-
-    return current;
-  };
-
   const openJsonDetail = (value: any) => {
-    setJsonDetail(normalizeJsonDetail(value));
+    setJsonDetail(value ?? null);
   };
 
   const closeJsonDetail = () => {
@@ -442,10 +433,17 @@ export default function MicroserviceLogsCard({
       setDateEnd(stored.dateEnd);
       setDateEndDraft(stored.dateEnd);
     }
-    if (stored.messageQuery) {
+    if (stored.messageQuery && initialMessageQuery === undefined) {
       setMessageQuery(stored.messageQuery);
+    } else if (initialMessageQuery !== undefined) {
+      setMessageQuery(initialMessageQuery);
     }
-  }, [storageKey]);
+  }, [storageKey, initialMessageQuery]);
+
+  useEffect(() => {
+    if (initialMessageQuery === undefined) return;
+    setMessageQuery(initialMessageQuery);
+  }, [initialMessageQuery]);
 
   useEffect(() => {
     writeStorageJson(storageKey, {
@@ -688,6 +686,33 @@ export default function MicroserviceLogsCard({
     dateEnd,
     messageQuery,
   ]);
+
+  const selectedRowIndex = useMemo(() => {
+    if (!selectedRow) return -1;
+    return filteredRows.findIndex((row) => {
+      if (row === selectedRow) return true;
+      return (
+        String(row.id ?? "") === String(selectedRow.id ?? "") &&
+        String(row.timestamp ?? row.ts ?? row.time ?? "") === String(selectedRow.timestamp ?? selectedRow.ts ?? selectedRow.time ?? "") &&
+        String(row.message ?? "") === String(selectedRow.message ?? "")
+      );
+    });
+  }, [filteredRows, selectedRow]);
+
+  const hasPreviousRow = selectedRowIndex > 0;
+  const hasNextRow = selectedRowIndex >= 0 && selectedRowIndex < filteredRows.length - 1;
+
+  const goToPreviousRow = () => {
+    if (!hasPreviousRow) return;
+    setSelectedRow(filteredRows[selectedRowIndex - 1] ?? null);
+    setAlertMode(false);
+  };
+
+  const goToNextRow = () => {
+    if (!hasNextRow) return;
+    setSelectedRow(filteredRows[selectedRowIndex + 1] ?? null);
+    setAlertMode(false);
+  };
 
   const moduleOptions = useMemo(() => {
     const base = new Set<string>();
@@ -1160,7 +1185,7 @@ export default function MicroserviceLogsCard({
             </div>
             <div className="max-h-[70vh] overflow-auto p-4">
               <pre className="whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
-{typeof jsonDetail === "string" ? jsonDetail : JSON.stringify(jsonDetail, null, 2)}
+{JSON.stringify(jsonDetail, null, 2)}
               </pre>
             </div>
           </div>
@@ -1172,6 +1197,24 @@ export default function MicroserviceLogsCard({
           <div className="flex w-full max-w-3xl flex-col rounded-xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div className="text-sm font-semibold text-slate-900">Dettagli Log</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={goToPreviousRow}
+                  disabled={!hasPreviousRow}
+                >
+                  Precedente
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={goToNextRow}
+                  disabled={!hasNextRow}
+                >
+                  Successivo
+                </button>
+              </div>
             </div>
             <div className="max-h-[70vh] overflow-auto p-4">
               <table className="w-full border-collapse text-xs">

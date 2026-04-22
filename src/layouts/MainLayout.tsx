@@ -65,13 +65,15 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
     }
 
     if (page === "admin/*" || page === "admin") {
-      ["users", "api_key", "logs", "alerts", "scheduler", "capital-allocation", "microservice"].forEach((segment) => {
+      ["users", "api_key", "logs", "alerts", "scheduler", "capital-allocation", "simulator", "microservice"].forEach((segment) => {
         const href = `#/admin/${segment}`;
         const label =
           segment === "api_key"
             ? "API Key"
             : segment === "microservice"
               ? "Microservice"
+              : segment === "simulator"
+                ? "Simulatore"
               : segment === "capital-allocation"
                 ? "Capital Allocation"
                 : formatLabel(segment);
@@ -91,6 +93,8 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
           ? "API Key"
           : segment === "microservice"
             ? "Microservice"
+            : segment === "simulator"
+              ? "Simulatore"
             : formatLabel(segment);
       if (!adminChildren.some((child) => child.href === href)) {
         adminChildren.push({ label, href });
@@ -104,7 +108,7 @@ const buildNavLinks = (navEntries?: any[]): NavLink[] => {
   }
 
   if (adminChildren.length) {
-    const order = { users: 0, api_key: 1, logs: 2, alerts: 3, scheduler: 4, "capital-allocation": 5, microservice: 6 } as Record<string, number>;
+    const order = { users: 0, api_key: 1, logs: 2, alerts: 3, scheduler: 4, "capital-allocation": 5, simulator: 6, microservice: 7 } as Record<string, number>;
     adminChildren.sort((a, b) => {
       const aKey = String(a.href || "").replace(/^#\/admin\//, "");
       const bKey = String(b.href || "").replace(/^#\/admin\//, "");
@@ -299,7 +303,7 @@ export function MainLayout({
   }, []);
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 z-40 transform border-r border-slate-200 bg-white p-4 transition-all duration-200 md:static md:translate-x-0 ${
@@ -441,6 +445,7 @@ export function MainLayout({
                         if (label === "Alerts") return "mdi:alert-outline";
                         if (label === "Scheduler") return "mdi:clock-outline";
                         if (label === "Capital Allocation") return "mdi:chart-pie";
+                        if (label === "Simulatore") return "mdi:chart-timeline-variant";
                         if (label === "Tickers") return "mdi:chart-line";
                         if (label === "User Tickers") return "mdi:account-star";
                         return "mdi:circle";
@@ -523,7 +528,7 @@ export function MainLayout({
       {/* Overlay for mobile */}
       {openNav && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={closeNav} />}
 
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
           <div className="flex items-center gap-3">
             <button
@@ -539,7 +544,7 @@ export function MainLayout({
           </div>
           <UserMenu userName={userName} />
         </header>
-        <main className="flex-1 overflow-y-auto p-4 pb-16">{children}</main>
+        <main className="flex flex-1 flex-col min-h-0 overflow-y-auto p-4 pb-[47px]">{children}</main>
         <footer className="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between border-t border-slate-200 bg-white/90 px-3 py-2 text-[11px] text-slate-600 backdrop-blur">
           <div className="flex items-center gap-2">
             <button
