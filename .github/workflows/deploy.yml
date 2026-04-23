@@ -107,14 +107,14 @@ jobs:
           VERSION="${{ vars.ASTRAAI_VERSION }}"
 
           ssh -o StrictHostKeyChecking=no $GCP_USER@$GCP_HOST "ENV_NAME=${{ github.ref_name }} VERSION=$VERSION bash -s" << 'EOF'
-            cd ~/deploy
+            cd ~/deploy/trading-system
 
             LOWER_ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]')
             COMPOSE_FILE="docker-compose.${LOWER_ENV_NAME}.yml"
             LOWER_PROJECT_NAME="$LOWER_ENV_NAME"
 
             if [[ ! -f ".env" ]]; then
-              echo "❌ .env non trovato in ~/deploy"
+              echo "❌ .env non trovato in ~/deploy/trading-system"
               exit 1
             fi
 
